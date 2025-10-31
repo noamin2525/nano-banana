@@ -21,6 +21,11 @@
 <style>
   body {
     font-family: 'Sora', sans-serif;
+    background-color: #020617; /* bg-slate-950 */
+    overflow: hidden; /* Prevent body scroll */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #e2e8f0; /* slate-200 */
   }
   .aurora-background {
     position: fixed;
@@ -29,7 +34,6 @@
     width: 100%;
     height: 100vh;
     z-index: -1;
-    background-color: #020617; /* bg-slate-950 */
     overflow: hidden;
   }
   .aurora-background::before,
@@ -39,29 +43,137 @@
     width: 800px;
     height: 800px;
     border-radius: 50%;
-    opacity: 0.3;
+    opacity: 0.2;
     mix-blend-mode: screen;
-    filter: blur(100px);
-    animation: pulse 20s infinite alternate;
+    filter: blur(120px);
+    animation: pulse 25s infinite alternate;
   }
   .aurora-background::before {
-    background-color: #38bdf8; /* sky-400 */
+    background-color: #22d3ee; /* cyan-400 */
     top: -200px;
     left: -200px;
   }
   .aurora-background::after {
-    background-color: #8b5cf6; /* violet-500 */
+    background-color: #d946ef; /* fuchsia-500 */
     bottom: -200px;
     right: -200px;
-    animation-delay: -10s;
+    animation-delay: -12.5s;
   }
   @keyframes pulse {
     0% { transform: scale(0.8) translate(0px, 0px); }
     100% { transform: scale(1.2) translate(50px, -50px); }
   }
+
+  @keyframes pulse-active {
+    0% { transform: scale(0.9) translate(0px, 0px); opacity: 0.3; }
+    100% { transform: scale(1.4) translate(20px, -20px); opacity: 0.5; }
+  }
+
+  .is-loading .aurora-background::before,
+  .is-loading .aurora-background::after {
+      animation: pulse-active 8s infinite alternate;
+  }
+
+  @keyframes pulsating-border {
+      0% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4), inset 0 0 0 1px rgba(168, 85, 247, 0.4); } /* purple-500 */
+      50% { box-shadow: 0 0 20px 5px rgba(168, 85, 247, 0.1), inset 0 0 10px 2px rgba(168, 85, 247, 0.2); }
+      100% { box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.4), inset 0 0 0 1px rgba(168, 85, 247, 0.4); }
+  }
+
+  .is-loading #canvas-display {
+      animation: pulsating-border 2s infinite;
+  }
+  
+  #generate-button:not(:disabled):hover {
+      transform: scale(1.03);
+      box-shadow: 0 10px 30px -10px rgba(168, 85, 247, 0.6);
+  }
+
+  @keyframes fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+  }
+  .animate-fade-in {
+      animation: fade-in 0.5s ease-out forwards;
+  }
+  
+  /* New Styles for Redesign */
+  .floating-panel {
+    position: fixed;
+    top: 88px; /* Below header */
+    bottom: 24px;
+    width: 400px;
+    max-width: calc(100vw - 48px);
+    z-index: 50;
+    transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .floating-panel-content {
+    background-color: rgba(15, 23, 42, 0.8); /* bg-slate-900/80 */
+    backdrop-filter: blur(16px);
+    border-radius: 1rem;
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.75), inset 0 1px 1px 0 rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(100, 116, 139, 0.3); /* ring-slate-400/30 */
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .floating-panel.left {
+    right: 24px;
+    transform: translateX(0);
+  }
+  
+  .floating-panel.left.hidden {
+    transform: translateX(calc(100% + 24px));
+  }
+
+  .floating-panel.right {
+    left: 24px;
+    transform: translateX(0);
+  }
+
+  .floating-panel.right.hidden {
+    transform: translateX(calc(-100% - 24px));
+  }
+  
+  .panel-scroll-content {
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #64748b #1e293b; /* slate-500 slate-800 */
+  }
+  
+  /* Style scrollbar for webkit browsers */
+  .panel-scroll-content::-webkit-scrollbar {
+    width: 6px;
+  }
+  .panel-scroll-content::-webkit-scrollbar-track {
+    background: #1e293b; /* slate-800 */
+    border-radius: 10px;
+  }
+  .panel-scroll-content::-webkit-scrollbar-thumb {
+    background-color: #64748b; /* slate-500 */
+    border-radius: 10px;
+    border: 2px solid #1e293b; /* slate-800 */
+  }
+  
+  /* Style for accordion in style selector */
+  details > summary {
+    list-style: none;
+  }
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  details[open] summary .accordion-icon {
+      transform: rotate(180deg);
+  }
+
 </style>
 </head>
-<body class="bg-slate-950">
+<body class="bg-slate-950 text-slate-200">
   <div class="aurora-background"></div>
   <div id="root"></div>
   <script type="module" src="/index.tsx"></script>

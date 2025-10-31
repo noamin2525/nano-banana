@@ -1,6 +1,7 @@
 
 
-import { GoogleGenAI, Modality, GenerateContentResponse, Type } from "@google/genai";
+
+import { GoogleGenAI, Modality, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 
 // Utility to convert file to base64
 export const fileToBase64 = (file: File): Promise<{base64: string, mimeType: string}> => {
@@ -25,6 +26,13 @@ const getEffectiveApiKey = (apiKey?: string): string => {
     return keyToUse;
 };
 
+const safetySettings = [
+    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
+
 const parseAndThrowApiError = (error: Error, action: string): never => {
     let errorJson;
     try {
@@ -33,9 +41,6 @@ const parseAndThrowApiError = (error: Error, action: string): never => {
         // Not a JSON error message, fallback to string matching
         if (error.message.includes('API key not valid')) {
             throw new Error(`מפתח ה-API שסופק אינו תקין (${action}). אנא בדקו את ההגדרות.`);
-        }
-        if (error.message.includes('SAFETY')) {
-             throw new Error(`${action} נחסם עקב הגדרות בטיחות. אנא נסו הנחיה אחרת.`);
         }
         throw new Error(`${action} נכשל: ${error.message}`);
     }
@@ -108,29 +113,15 @@ const parseAndThrowApiError = (error: Error, action: string): never => {
     throw new Error(`${action} נכשל: ${message}`);
 };
 
-
 const handleGeminiResponse = (
   response: GenerateContentResponse,
   action: 'עיבוד' | 'יצירה'
 ): { base64: string; mimeType: string } => {
-  const blockReason = response.promptFeedback?.blockReason;
-  if (blockReason) {
-    throw new Error(`פעולת ה${action} נחסמה. סיבה: ${blockReason}. אנא נסו הנחיה אחרת.`);
-  }
-
   const candidate = response.candidates?.[0];
   if (!candidate) {
     throw new Error(
-      `Gemini לא החזיר תמונה. הדבר קורה לעתים קרובות כאשר ההנחיה או התמונה נחסמות על ידי מסנני בטיחות. אנא נסו הנחיה אחרת.`
+      `Gemini לא החזיר תמונה. ייתכן שההנחיה נחסמה או שאירעה שגיאה בתקשורת. אנא נסו הנחיה אחרת.`
     );
-  }
-
-  const finishReason = candidate.finishReason;
-  if (finishReason && finishReason !== 'STOP') {
-    if (finishReason === 'SAFETY') {
-      throw new Error('התגובה נחסמה עקב הגדרות בטיחות. אנא נסו הנחיה אחרת.');
-    }
-    throw new Error(`פעולת ה${action} נכשלה. המודל הפסיק לעבוד מהסיבה הבאה: ${finishReason}.`);
   }
 
   if (!candidate.content || !candidate.content.parts) {
@@ -190,6 +181,7 @@ export const generateFromImagesAndPrompt = async (
       config: {
         responseModalities: [Modality.IMAGE],
       },
+      safetySettings,
     });
 
     return handleGeminiResponse(response, 'עיבוד');
@@ -219,18 +211,20 @@ export const generateImageWithGemini = async (
           outputMimeType: 'image/png',
           aspectRatio: aspectRatio,
         },
+        safetySettings,
     });
-    
-    if (!response.generatedImages || response.generatedImages.length === 0) {
-        throw new Error("Imagen לא החזיר תמונה. ייתכן שההנחיה נחסמה עקב הגדרות בטיחות.");
-    }
 
+    if (!response.generatedImages || response.generatedImages.length === 0) {
+        throw new Error("Imagen לא החזיר תמונה. ייתכן שההנחיה נחסמה עקב הגדרות בטיחות. נסו לשנות את ההנחיה.");
+    }
+    
     const image = response.generatedImages[0];
+
     const base64 = image.image.imageBytes;
     const mimeType = image.image.mimeType || 'image/png';
 
     if (!base64) {
-        throw new Error("לא נמצא מידע תמונה בתגובה מ-Imagen.");
+        throw new Error("לא נמצא מידע תמונה בתגובה מ-Imagen. ייתכן שהתמונה נחסמה חלקית.");
     }
     
     return { base64, mimeType };
@@ -272,6 +266,7 @@ export const analyzePromptWithGemini = async (prompt: string, apiKey?: string): 
           required: ['suggestions'],
         },
       },
+      safetySettings,
     });
 
     const jsonString = response.text;
@@ -312,11 +307,8 @@ export const generateChatResponse = async (
             model,
             contents,
             config,
+            safetySettings,
         });
-
-        if (response.promptFeedback?.blockReason) {
-            return `הבקשה נחסמה. סיבה: ${response.promptFeedback.blockReason}.`;
-        }
 
         return response.text;
     } catch (error) {
@@ -338,6 +330,7 @@ export const validateApiKey = async (apiKey: string): Promise<boolean> => {
         await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: 'hello',
+            safetySettings,
         });
         return true;
     } catch (error) {
@@ -347,6 +340,61 @@ export const validateApiKey = async (apiKey: string): Promise<boolean> => {
         }
         throw new Error("אימות מפתח API נכשל.");
     }
+};
+
+export const generateInpaintingFromImagesAndPrompt = async (
+  originalImage: { base64: string; mimeType: string },
+  maskImage: { base64: string; mimeType: string },
+  prompt: string,
+  apiKey?: string
+): Promise<{base64: string, mimeType: string}> => {
+  if (!prompt.trim()) {
+    throw new Error("נדרשת הנחיה כדי לבצע עריכת קסם.");
+  }
+
+  const effectiveApiKey = getEffectiveApiKey(apiKey);
+  const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
+
+  const originalImagePart = {
+    inlineData: {
+      data: originalImage.base64,
+      mimeType: originalImage.mimeType,
+    },
+  };
+
+  const maskImagePart = {
+      inlineData: {
+          data: maskImage.base64,
+          mimeType: maskImage.mimeType,
+      }
+  }
+  
+  const systemPrompt = `You are an expert at inpainting. You will receive an original image, a mask image, and a text prompt. The mask image is black where the original image should be preserved, and white where the image should be edited according to the prompt. Your task is to seamlessly replace the white area of the mask on the original image with the content described in the prompt: "${prompt}".`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-image',
+      contents: {
+        parts: [
+          originalImagePart,
+          maskImagePart,
+          { text: systemPrompt },
+        ],
+      },
+      config: {
+        responseModalities: [Modality.IMAGE],
+      },
+      safetySettings,
+    });
+
+    return handleGeminiResponse(response, 'עיבוד');
+  } catch (error) {
+    console.error("שגיאה בעת עריכת קסם עם Gemini:", error);
+    if (error instanceof Error) {
+        parseAndThrowApiError(error, 'עריכת קסם עם Gemini');
+    }
+    throw new Error("עריכת הקסם נכשלה. אירעה שגיאה לא ידועה בתקשורת עם ה-API.");
+  }
 };
 
 

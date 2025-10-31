@@ -1,4 +1,5 @@
 
+
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { 
@@ -10,16 +11,19 @@ import {
     addCreationToDB, 
     deleteCreationFromDB,
     generateChatResponse,
-    validateApiKey
+    validateApiKey,
+    generateInpaintingFromImagesAndPrompt
 } from './services/geminiService';
 import { 
     SpinnerIcon, SparklesIcon, UploadIcon, ArrowPathIcon, TrashIcon, DownloadIcon, MagicWandIcon, 
     AspectRatioSquareIcon, AspectRatioLandscapeIcon, AspectRatioPortraitIcon, AspectRatioFourThreeIcon, 
     AspectRatioThreeFourIcon, PlusIcon, XMarkIcon, ArrowsPointingOutIcon, AdjustmentsHorizontalIcon, 
     CheckIcon, ArrowUturnLeftIcon, BeakerIcon, ClipboardDocumentIcon, KeyIcon,
-    ChatBubbleLeftRightIcon
+    ChatBubbleLeftRightIcon, MagnifyingGlassPlusIcon, MagnifyingGlassMinusIcon, ArrowsPointingInIcon,
+    PencilIcon, Square2StackIcon, Squares2X2Icon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PaintBrushIcon
 } from './components/Icons';
 import { ChatWindow } from './components/ChatWindow';
+import { TutorialOverlay } from './components/TutorialOverlay';
 
 type ImageState = {
   id: string;
@@ -38,6 +42,8 @@ type Adjustment = {
 
 type StyleKey = keyof typeof STYLES;
 type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
+type Mode = 'create' | 'edit' | 'combine';
+type ActiveTool = 'resize' | 'edit' | 'inpaint';
 
 type Creation = {
   id: string;
@@ -71,57 +77,60 @@ const FILTERS: Record<string, Adjustment> = {
 };
 
 const STYLES = {
-  'ללא': '',
+  // Artistic Movements
+  'אימפרסיוניזם': 'impressionist painting, visible brushstrokes, light and color focus, by Claude Monet',
+  'סוריאליסטי': 'surrealism, dream-like, bizarre, illogical scenes, by Salvador Dalí',
+  'קוביזם': 'cubism, geometric shapes, multiple viewpoints, fragmented objects',
+  'פופ ארט': 'pop art, bold colors, Ben-Day dots, comic book style, by Andy Warhol',
+  'ארט נובו': 'art nouveau, elegant, flowing lines, nature-inspired, organic forms',
+  'בארוק': 'baroque painting, dramatic, chiaroscuro, rich colors, emotional intensity, by Caravaggio',
+  'פסיכדלי': 'psychedelic art, vibrant swirling colors, distorted patterns, 1960s counter-culture',
+  'אוקיו-אה': 'ukiyo-e style, Japanese woodblock print, flat colors, bold outlines, by Hokusai',
+  'ימי הביניים': 'medieval illuminated manuscript, gothic art, rich colors, gold leaf, detailed borders',
+  
+  // Digital Art & Sci-Fi
   'פוטוריאליסטי': 'photorealistic, 8k, detailed, professional photography, sharp focus',
-  'אנימה': 'anime style, vibrant colors, detailed characters, dynamic scenes, by Studio Ghibli',
+  'מציאותי ביותר': 'hyperrealistic, ultra-detailed, 16k resolution, cinematic lighting, sharp focus, professional photography, octane render, unreal engine 5',
+  'מדע בדיוני': 'sci-fi, futuristic, neon lights, cyberpunk aesthetic, high-tech',
   'פנטזיה': 'fantasy art, epic, magical, otherworldly, detailed, by Greg Rutkowski',
+  'רינדור תלת-ממדי': '3D render, CGI, Octane render, high detail, realistic lighting, trending on ArtStation',
+  'פיקסל ארט': 'pixel art, 8-bit, retro gaming style, blocky, nostalgic',
+  'איזומטרי': 'isometric 3D, low-poly, clean, stylized, high angle view',
+  'הולוגרפי': 'holographic, neon, iridescent, glowing, futuristic interface',
+  'סטימפאנק': 'steampunk, gears, clockwork, Victorian aesthetic, brass and copper',
+  'סולארפאנק': 'solarpunk, optimistic future, nature and technology in harmony, sustainable',
+
+  // Painting & Drawing
   'צבעי מים': 'watercolor painting, soft, blended colors, artistic, light wash',
   'צבע בשמן': 'oil painting, classic, rich textures, visible brushstrokes',
-  'מדע בדיוני': 'sci-fi, futuristic, neon lights, cyberpunk aesthetic, high-tech',
-  'קריקטורה': 'cartoon style, vibrant, playful, bold lines, cel-shaded',
-  'פיקסל ארט': 'pixel art, 8-bit, retro gaming style, blocky, nostalgic',
-  'מינימליסטי': 'minimalist, clean lines, simple shapes, limited color palette, uncluttered',
-  'אמנות קו': 'line art, single line drawing, minimalist, black and white, elegant',
-  'רינדור תלת-ממדי': '3D render, CGI, Octane render, high detail, realistic lighting, trending on ArtStation',
-  'אימפרסיוניזם': 'impressionist painting, visible brushstrokes, light and color focus, by Claude Monet',
-  'גותי': 'gothic style, dark, moody, intricate details, dramatic lighting, mysterious',
-  'וינטג\'': 'vintage photo, retro, sepia tones, old-fashioned, film grain',
-  'סטימפאנק': 'steampunk, gears, clockwork, Victorian aesthetic, brass and copper',
-  'סוריאליסטי': 'surrealism, dream-like, bizarre, illogical scenes, by Salvador Dalí',
-  'פופ ארט': 'pop art, bold colors, Ben-Day dots, comic book style, by Andy Warhol',
-  'פלסטלינה': 'claymation style, stop-motion, plasticine, textured, handcrafted look',
-  'זכוכית צבעונית': 'stained glass window, vibrant colors, leaded lines, intricate patterns',
-  'אוריגמי': 'origami style, folded paper, geometric, clean, intricate folds',
-  'חשיפה כפולה': 'double exposure, superimposed images, abstract, blended',
-  'גרפיטי': 'graffiti art, street art, spray paint, vibrant, urban, tagging',
-  'קולנועי': 'cinematic shot, anamorphic lens, dramatic lighting, shallow depth of field, color graded',
-  'איזומטרי': 'isometric 3D, low-poly, clean, stylized, high angle view',
-  'גליץ\' ארט': 'glitch art, databending, pixel sorting, digital artifacts, RGB shift',
-  'הולוגרפי': 'holographic, neon, iridescent, glowing, futuristic interface',
-  'שעת הזהב': 'golden hour photography, warm light, long shadows, soft focus',
-  'רישום פחם': 'charcoal drawing, dramatic, rich shadows, textured paper',
+  'אנימה': 'anime style, vibrant colors, detailed characters, dynamic scenes, by Studio Ghibli',
   'סקיצה': 'pencil sketch, hand-drawn, authentic, graphite shading',
-  'ארט נובו': 'art nouveau, elegant, flowing lines, nature-inspired, organic forms',
-  'קוביזם': 'cubism, geometric shapes, multiple viewpoints, fragmented objects',
-  'אמנות מופשטת': 'abstract art, non-representational, shapes, colors, emotions',
-  'תחריט עץ': 'woodcut print, bold black lines, classic printmaking style, high contrast',
-  'סולארפאנק': 'solarpunk, optimistic future, nature and technology in harmony, sustainable',
-  'וייפורווייב': 'vaporwave, retro-futuristic aesthetic, 80s and 90s nostalgia, neon grids',
-  'דיזלפאנק': 'dieselpunk, art deco, noir atmosphere, diesel-powered machinery',
-  'שרטוט טכני': 'blueprint, technical drawing, architectural plan, white on blue',
-  'אינפוגרפיקה': 'infographic, clean vector style, diagrams, data visualization',
+  'רישום פחם': 'charcoal drawing, dramatic, rich shadows, textured paper',
+  'אמנות קו': 'line art, single line drawing, minimalist, black and white, elegant',
+
+  // Photography & Cinematic
+  'קולנועי': 'cinematic shot, anamorphic lens, dramatic lighting, shallow depth of field, color graded',
+  'וינטג\'': 'vintage photo, retro, sepia tones, old-fashioned, film grain',
+  'חשיפה כפולה': 'double exposure, superimposed images, abstract, blended',
+  'שעת הזהב': 'golden hour photography, warm light, long shadows, soft focus',
+  'גותי': 'gothic style, dark, moody, intricate details, dramatic lighting, mysterious',
+  'מלחמת העולם השנייה': 'World War II photo, black and white, film grain, historical, 1940s style, documentary photography',
+
+  
+  // Graphic & Abstract
+  'מינימליסטי': 'minimalist, clean lines, simple shapes, limited color palette, uncluttered',
+  'גרפיטי': 'graffiti art, street art, spray paint, vibrant, urban, tagging',
   'ספר קומיקס': 'comic book style, bold outlines, vibrant flat colors, action lines',
   'ארט דקו': 'art deco style, geometric patterns, sleek lines, glamorous, 1920s',
-  'באוהאוס': 'bauhaus style, functionalism, geometric shapes, primary colors, minimalist',
-  'אוקיו-אה': 'ukiyo-e style, Japanese woodblock print, flat colors, bold outlines, by Hokusai',
-  'רוקוקו': 'rococo painting, ornate, pastel colors, lighthearted, elegant, by Fragonard',
-  'בארוק': 'baroque painting, dramatic, chiaroscuro, rich colors, emotional intensity, by Caravaggio',
-  'פוינטיליזם': 'pointillism, small dots of color, vibrant, shimmering effect, by Georges Seurat',
-  'פסיכדלי': 'psychedelic art, vibrant swirling colors, distorted patterns, 1960s counter-culture',
-  'סינת\'ווייב': 'synthwave aesthetic, neon grids, 80s retro futurism, palm trees, sunset',
-  'אקספרסיוניזם מופשט': 'abstract expressionism, spontaneous, energetic brushstrokes, non-representational, by Jackson Pollock',
-  'אמנות שבטית': 'tribal art, indigenous patterns, symbolic, earthy tones',
-  'אמנות קונספטואלית': 'conceptual art, idea-focused, minimalist, thought-provoking',
+  'אמנות מופשטת': 'abstract art, non-representational, shapes, colors, emotions',
+};
+
+const STYLE_CATEGORIES: Record<string, StyleKey[]> = {
+    'תנועות אמנותיות': ['אימפרסיוניזם', 'סוריאליסטי', 'קוביזם', 'פופ ארט', 'ארט נובו', 'בארוק', 'פסיכדלי', 'אוקיו-אה', 'ימי הביניים'],
+    'אמנות דיגיטלית ומד"ב': ['פוטוריאליסטי', 'מציאותי ביותר', 'מדע בדיוני', 'פנטזיה', 'רינדור תלת-ממדי', 'פיקסל ארט', 'איזומטרי', 'הולוגרפי', 'סטימפאנק', 'סולארפאנק'],
+    'ציור ורישום': ['צבעי מים', 'צבע בשמן', 'אנימה', 'סקיצה', 'רישום פחם', 'אמנות קו'],
+    'צילום וקולנוע': ['קולנועי', 'וינטג\'', 'חשיפה כפולה', 'שעת הזהב', 'גותי', 'מלחמת העולם השנייה'],
+    'גרפי ומופשט': ['מינימליסטי', 'גרפיטי', 'ספר קומיקס', 'ארט דקו', 'אמנות מופשטת'],
 };
 
 const samplePrompts = [
@@ -169,193 +178,359 @@ const AdjustmentSlider: React.FC<{
             value={value}
             onChange={(e) => onChange(name, e.target.value)}
             disabled={disabled}
-            className="w-full h-2 bg-slate-700/50 rounded-lg appearance-none cursor-pointer accent-sky-400 disabled:opacity-50"
+            className="w-full h-2 bg-slate-700/50 rounded-lg appearance-none cursor-pointer accent-purple-500 disabled:opacity-50"
         />
     </div>
 );
 
-const ResultDisplay: React.FC<{
+const CanvasDisplay: React.FC<{
   imageState: ImageState | null;
   isLoading?: boolean;
-  onDownload?: () => void;
-  onUseAsSource?: () => void;
-  isResizing: boolean;
-  resizeWidth: string;
-  resizeHeight: string;
-  onWidthChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onHeightChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  keepAspectRatio: boolean;
-  onKeepAspectRatioChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onResize: () => void;
   adjustments: Adjustment;
-  onAdjustmentChange: (adjustment: keyof Adjustment, value: string) => void;
-  onSetAdjustments: (adjustments: Adjustment) => void;
-  onApplyEdits: () => void;
-  onResetEdits: () => void;
-  isEditing: boolean;
-  isApplyingEdits: boolean;
-  activeTab: 'resize' | 'edit';
-  onTabChange: (tab: 'resize' | 'edit') => void;
+  zoom: number;
+  pan: { x: number; y: number };
+  onZoomChange: (zoom: React.SetStateAction<number>) => void;
+  onPanChange: (pan: React.SetStateAction<{x: number, y: number}>) => void;
+  onResetZoomAndPan: () => void;
+  activeTool: ActiveTool;
+  brushSize: number;
+  imageForInpaintingRef: React.RefObject<HTMLImageElement>;
+  maskCanvasRef: React.RefObject<HTMLCanvasElement>;
+  onDrawOnMask: () => void;
+  onCursorMove: (e: React.MouseEvent) => void;
+  onCursorLeave: () => void;
 }> = ({
   imageState,
   isLoading = false,
-  onDownload,
-  onUseAsSource,
-  isResizing,
-  resizeWidth,
-  resizeHeight,
-  onWidthChange,
-  onHeightChange,
-  keepAspectRatio,
-  onKeepAspectRatioChange,
-  onResize,
   adjustments,
-  onAdjustmentChange,
-  onSetAdjustments,
-  onApplyEdits,
-  onResetEdits,
-  isEditing,
-  isApplyingEdits,
-  activeTab,
-  onTabChange
+  zoom,
+  pan,
+  onZoomChange,
+  onPanChange,
+  onResetZoomAndPan,
+  activeTool,
+  brushSize,
+  imageForInpaintingRef,
+  maskCanvasRef,
+  onDrawOnMask,
+  onCursorMove,
+  onCursorLeave
 }) => {
     
   const filterString = useMemo(() => generateFilterString(adjustments), [adjustments]);
-  const isBusy = isLoading || isResizing || isApplyingEdits;
+
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const lastPos = useRef<{ x: number; y: number } | null>(null);
+  const [hoverPan, setHoverPan] = useState({ x: 0, y: 0 });
+
+  const clamp = (val: number, min: number, max: number) => Math.max(min, Math.min(val, max));
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !imageState || isLoading || activeTool === 'inpaint') return;
+
+    const handleWheelEvent = (e: WheelEvent) => {
+        e.preventDefault();
+        
+        const rect = viewport.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left - rect.width / 2;
+        const mouseY = e.clientY - rect.top - rect.height / 2;
+
+        const scaleAmount = 1 - e.deltaY * 0.001;
+        
+        onZoomChange(prevZoom => {
+            const newZoom = clamp(prevZoom * scaleAmount, 0.5, 5);
+            onPanChange(prevPan => {
+                const newPanX = mouseX - ((mouseX - prevPan.x) / prevZoom) * newZoom;
+                const newPanY = mouseY - ((mouseY - prevPan.y) / prevZoom) * newZoom;
+                return { x: newPanX, y: newPanY };
+            });
+            return newZoom;
+        });
+    };
+
+    viewport.addEventListener('wheel', handleWheelEvent, { passive: false });
+
+    return () => {
+        viewport.removeEventListener('wheel', handleWheelEvent);
+    };
+  }, [imageState, isLoading, onPanChange, onZoomChange, activeTool]);
+
+  useEffect(() => {
+    const canvas = maskCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (ctx) {
+        ctx.lineWidth = brushSize;
+    }
+  }, [brushSize, maskCanvasRef]);
+
+  const draw = (e: React.MouseEvent, isSinglePoint = false) => {
+    const ctx = maskCanvasRef.current?.getContext('2d');
+    if (!ctx) return;
+
+    const canvas = maskCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    
+    if (isSinglePoint) {
+        ctx.beginPath();
+        // Adjust arc radius for canvas scaling
+        const scaledBrushSize = (brushSize / 2) * (canvas.width / rect.width);
+        ctx.arc(x, y, scaledBrushSize, 0, Math.PI * 2);
+        ctx.fillStyle = 'white'; // Fill for single point
+        ctx.fill();
+    } else if (lastPos.current) {
+        ctx.beginPath();
+        ctx.moveTo(lastPos.current.x, lastPos.current.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+    }
+    lastPos.current = { x, y };
+    onDrawOnMask();
+  };
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (activeTool === 'inpaint') {
+        if (e.button !== 0) return; // Only main click
+        setIsDrawing(true);
+        draw(e, true); // Draw a single point on mousedown
+        e.preventDefault();
+        e.stopPropagation();
+    } else {
+        setIsPanning(true);
+        setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  };
+  
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (activeTool === 'inpaint') {
+        if (isDrawing) {
+            draw(e, false); // Draw a line on mousemove
+        }
+    } else if (isPanning) {
+        onPanChange({
+          x: e.clientX - panStart.x,
+          y: e.clientY - panStart.y,
+        });
+    }
+  };
+
+  const handleMouseUpOrLeave = () => {
+    if (activeTool === 'inpaint') {
+        setIsDrawing(false);
+        lastPos.current = null;
+    } else if (isPanning) {
+        setIsPanning(false);
+    }
+  };
+
+  const handleHoverMove = (e: React.MouseEvent) => {
+    if (isLoading || !imageState || isPanning || activeTool === 'inpaint') {
+      if (hoverPan.x !== 0 || hoverPan.y !== 0) {
+        setHoverPan({ x: 0, y: 0 });
+      }
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+
+    const panX = ((x - centerX) / centerX) * -15; // Max pan 15px
+    const panY = ((y - centerY) / centerY) * -15; // Max pan 15px
+
+    setHoverPan({ x: panX, y: panY });
+  };
+
+  const handleHoverLeave = () => {
+    setHoverPan({ x: 0, y: 0 });
+  };
+
+  const handleZoomButtonClick = (direction: 'in' | 'out') => {
+    const scaleAmount = direction === 'in' ? 1.2 : 1 / 1.2;
+    const newZoom = clamp(zoom * scaleAmount, 0.5, 5);
+    
+    const newPanX = pan.x * (newZoom / zoom);
+    const newPanY = pan.y * (newZoom / zoom);
+
+    onZoomChange(newZoom);
+    onPanChange({ x: newPanX, y: newPanY });
+  };
+  
+  const finalPanX = pan.x + hoverPan.x;
+  const finalPanY = pan.y + hoverPan.y;
+
+  let viewportCursor = 'default';
+  if (activeTool === 'inpaint' && imageState) {
+      viewportCursor = 'none';
+  } else if (imageState && !isLoading && activeTool !== 'inpaint') {
+      viewportCursor = isPanning ? 'grabbing' : 'grab';
+  }
+  
+  const canvasWrapperStyle: React.CSSProperties = {
+    transform: `translate(${finalPanX}px, ${finalPanY}px) scale(${zoom})`,
+    transition: 'transform 0.2s cubic-bezier(0.25, 1, 0.5, 1)',
+    position: 'relative',
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center'
+  };
 
   return (
-    <div id="result-panel" className="bg-slate-900/50 backdrop-blur-xl p-4 rounded-2xl shadow-2xl flex flex-col h-full ring-1 ring-white/10">
-      <h2 className="text-xl font-semibold text-slate-200 mb-4 pl-1">תוצאה</h2>
-      <div className="flex-grow flex items-center justify-center bg-black/20 rounded-lg overflow-hidden aspect-square relative group transition-all duration-300">
+    <div 
+        id="canvas-display"
+        ref={viewportRef}
+        className="flex-grow w-full h-full flex items-center justify-center rounded-lg overflow-hidden relative group transition-shadow duration-500"
+        style={{ cursor: viewportCursor }}
+        onMouseDown={imageState && !isLoading ? handleMouseDown : undefined}
+        onMouseMove={(e) => {
+            if (imageState && !isLoading) handleMouseMove(e);
+            onCursorMove(e);
+            handleHoverMove(e);
+        }}
+        onMouseUp={imageState && !isLoading ? handleMouseUpOrLeave : undefined}
+        onMouseLeave={(e) => {
+            if (imageState && !isLoading) handleMouseUpOrLeave();
+            onCursorLeave();
+            handleHoverLeave();
+        }}
+        >
         {isLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-300 z-10">
-            <SpinnerIcon className="animate-spin h-12 w-12 text-sky-400" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center transition-opacity duration-300 z-10 bg-slate-950/50 backdrop-blur-sm">
+            <SpinnerIcon className="animate-spin h-12 w-12 text-purple-400" />
             <p className="mt-4 text-sm text-slate-400">Gemini חושב...</p>
           </div>
         ) : imageState ? (
-          <img
-            src={imageState.dataUrl}
-            alt="תוצאה"
-            className="max-h-full max-w-full object-contain opacity-100 transition-opacity duration-500"
-            style={{ filter: filterString }}
-            key={imageState.dataUrl} // Force re-render on dataUrl change
-          />
+          <div style={canvasWrapperStyle}>
+            <img
+              ref={imageForInpaintingRef}
+              src={imageState.dataUrl}
+              alt="תוצאה"
+              className="max-h-full max-w-full object-contain block"
+              style={{ filter: filterString }}
+              key={imageState.id} 
+              draggable="false"
+              onLoad={() => {
+                const img = imageForInpaintingRef.current;
+                const canvas = maskCanvasRef.current;
+                if (img && canvas) {
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                        ctx.strokeStyle = 'white';
+                        ctx.lineWidth = brushSize * (img.naturalWidth / img.clientWidth); // Scale line width
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                    }
+                }
+              }}
+            />
+            {activeTool === 'inpaint' && (
+                <canvas
+                    ref={maskCanvasRef}
+                    className="absolute top-0 left-0 pointer-events-none w-full h-full"
+                    style={{
+                        opacity: 0.5,
+                        filter: 'blur(2px) contrast(1.2)'
+                    }}
+                />
+            )}
+            <div className={`absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-slate-900/60 backdrop-blur-md rounded-full px-3 py-1.5 shadow-lg ring-1 ring-white/10 transition-opacity duration-300 z-20 ${activeTool === 'inpaint' ? 'opacity-0' : 'opacity-0 group-hover:opacity-100'}`}>
+                <button onClick={() => handleZoomButtonClick('out')} className="p-1.5 rounded-full text-slate-300 hover:bg-slate-700/50 hover:text-white" aria-label="הקטן תצוגה"><MagnifyingGlassMinusIcon className="h-5 w-5"/></button>
+                <span className="text-sm font-mono text-slate-200 w-12 text-center select-none">{(zoom * 100).toFixed(0)}%</span>
+                <button onClick={() => handleZoomButtonClick('in')} className="p-1.5 rounded-full text-slate-300 hover:bg-slate-700/50 hover:text-white" aria-label="הגדל תצוגה"><MagnifyingGlassPlusIcon className="h-5 w-5"/></button>
+                <div className="w-px h-5 bg-slate-600 mx-1"></div>
+                <button onClick={onResetZoomAndPan} disabled={zoom === 1 && pan.x === 0 && pan.y === 0} className="p-1.5 rounded-full text-slate-300 hover:bg-slate-700/50 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed" aria-label="אפס תצוגה"><ArrowsPointingInIcon className="h-5 w-5"/></button>
+            </div>
+          </div>
         ) : (
           <div className="text-center text-slate-500 px-6">
             <SparklesIcon className="mx-auto h-12 w-12" />
-            <p className="mt-2 text-sm">התוצאה שלכם תופיע כאן.</p>
+            <p className="mt-2 text-sm">הקנבס שלך ממתין ליצירה.</p>
           </div>
         )}
       </div>
-
-      {imageState && !isLoading && (
-        <div className="grid grid-cols-2 gap-3 mt-4">
-            <button
-                onClick={onDownload}
-                aria-label="הורדת תמונה"
-                disabled={isBusy}
-                className="inline-flex justify-center items-center px-4 py-2.5 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-                <DownloadIcon className="h-5 w-5 mr-2" />
-                <span>הורדה</span>
-            </button>
-            <button
-                onClick={onUseAsSource}
-                aria-label="השתמש כמקור"
-                disabled={isBusy}
-                className="inline-flex justify-center items-center px-4 py-2.5 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-                <ArrowPathIcon className="h-5 w-5 mr-2" />
-                <span>השתמש כמקור</span>
-            </button>
-        </div>
-      )}
-
-      {imageState && !isLoading && (
-        <div className="mt-4 pt-4 border-t border-white/10">
-            <div className="flex border-b border-white/10 mb-4">
-                <button 
-                    onClick={() => onTabChange('resize')}
-                    className={`flex-1 text-sm font-medium py-2.5 transition-colors duration-200 ${activeTab === 'resize' ? 'text-sky-400 border-b-2 border-sky-400' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                    <ArrowsPointingOutIcon className="inline-block -mt-1 mr-2 h-4 w-4" />
-                    שינוי גודל
-                </button>
-                 <button 
-                    onClick={() => onTabChange('edit')}
-                    className={`flex-1 text-sm font-medium py-2.5 transition-colors duration-200 ${activeTab === 'edit' ? 'text-sky-400 border-b-2 border-sky-400' : 'text-slate-400 hover:text-slate-200'}`}
-                >
-                    <AdjustmentsHorizontalIcon className="inline-block -mt-1 mr-2 h-4 w-4" />
-                    עריכה
-                </button>
-            </div>
-
-            {activeTab === 'resize' ? (
-                <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3 items-center">
-                        <input
-                            type="number" value={resizeWidth} onChange={onWidthChange}
-                            className="w-full bg-slate-900/50 border-white/10 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500 sm:text-sm text-slate-200 placeholder-slate-500 text-center"
-                            aria-label="רוחב" min="1" disabled={isResizing} />
-                        <input
-                            type="number" value={resizeHeight} onChange={onHeightChange}
-                            className="w-full bg-slate-900/50 border-white/10 rounded-md shadow-sm focus:ring-sky-500 focus:border-sky-500 sm:text-sm text-slate-200 placeholder-slate-500 text-center"
-                            aria-label="גובה" min="1" disabled={isResizing} />
-                    </div>
-                    <div className="flex items-center">
-                        <input
-                            id="keep-aspect-ratio" type="checkbox" checked={keepAspectRatio} onChange={onKeepAspectRatioChange}
-                            className="h-4 w-4 rounded border-slate-600 bg-slate-800/50 text-sky-500 focus:ring-sky-500" disabled={isResizing}/>
-                        <label htmlFor="keep-aspect-ratio" className="mr-2 text-sm text-slate-400">שמור על יחס גובה-רוחב</label>
-                    </div>
-                    <button onClick={onResize} disabled={isResizing}
-                        className="w-full inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                        {isResizing ? ( <><SpinnerIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />משנה גודל...</> ) : 'שנה גודל'}
-                    </button>
-                </div>
-            ) : (
-                <div className="space-y-4">
-                    <h3 className="text-sm font-medium text-slate-300">פילטרים</h3>
-                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                        {Object.entries(FILTERS).map(([name, adj]) => (
-                            <button key={name} onClick={() => onSetAdjustments(adj)} disabled={isApplyingEdits}
-                                className="text-center group disabled:opacity-50">
-                                <div className={`w-full aspect-square rounded-md bg-slate-700 overflow-hidden ring-2 transition-all ${JSON.stringify(adj) === JSON.stringify(adjustments) ? 'ring-sky-400' : 'ring-slate-600 group-hover:ring-sky-500'}`}>
-                                     <img src={imageState.dataUrl} alt={name} className="w-full h-full object-cover" style={{filter: generateFilterString(adj)}} />
-                                </div>
-                                <span className="text-xs mt-1.5 block text-slate-400 group-hover:text-slate-200">{name}</span>
-                            </button>
-                        ))}
-                    </div>
-                    
-                    <h3 className="text-sm font-medium text-slate-300 pt-2">התאמות</h3>
-                    <div className="space-y-3">
-                        <AdjustmentSlider label="בהירות" name="brightness" value={adjustments.brightness} min={0} max={200} onChange={onAdjustmentChange} disabled={isApplyingEdits} />
-                        <AdjustmentSlider label="ניגודיות" name="contrast" value={adjustments.contrast} min={0} max={200} onChange={onAdjustmentChange} disabled={isApplyingEdits} />
-                        <AdjustmentSlider label="רוויה" name="saturate" value={adjustments.saturate} min={0} max={200} onChange={onAdjustmentChange} disabled={isApplyingEdits} />
-                        <AdjustmentSlider label="ספיה" name="sepia" value={adjustments.sepia} min={0} max={100} onChange={onAdjustmentChange} disabled={isApplyingEdits} />
-                        <AdjustmentSlider label="שחור-לבן" name="grayscale" value={adjustments.grayscale} min={0} max={100} onChange={onAdjustmentChange} disabled={isApplyingEdits} />
-                    </div>
-
-                    {isEditing && (
-                        <div className="flex gap-3 pt-2">
-                            <button onClick={onApplyEdits} disabled={isApplyingEdits}
-                                className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-sky-500 hover:bg-sky-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                                {isApplyingEdits ? <><SpinnerIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />מחיל שינויים...</> : <><CheckIcon className="-ml-1 mr-2 h-4 w-4" />החל שינויים</>}
-                            </button>
-                             <button onClick={onResetEdits} disabled={isApplyingEdits}
-                                className="w-full inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-300 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                                <ArrowUturnLeftIcon className="-ml-1 mr-2 h-4 w-4" />
-                                אפס עריכות
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-      )}
-    </div>
   );
+};
+
+const SourceImagePreview: React.FC<{
+    images: ImageState[];
+    currentIndex: number;
+    onClose: () => void;
+    onNavigate: (newIndex: number) => void;
+}> = ({ images, currentIndex, onClose, onNavigate }) => {
+    const currentImage = images[currentIndex];
+    
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                onClose();
+            } else if (e.key === 'ArrowRight' && images.length > 1) {
+                onNavigate((currentIndex + 1) % images.length);
+            } else if (e.key === 'ArrowLeft' && images.length > 1) {
+                onNavigate((currentIndex - 1 + images.length) % images.length);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [currentIndex, images.length, onClose, onNavigate]);
+
+    if (!currentImage) return null;
+
+    return (
+        <div className="fixed inset-0 z-[1001] animate-fade-in flex items-center justify-center p-4" role="dialog" aria-modal="true">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl" onClick={onClose}></div>
+            
+            <div className="relative z-10 w-full h-full flex items-center justify-center">
+                {/* Image Display */}
+                <div className="max-w-[80vw] max-h-[80vh]">
+                     <img src={currentImage.dataUrl} alt={`תצוגה מקדימה ${currentIndex + 1}`} className="w-auto h-auto max-w-full max-h-full object-contain rounded-lg shadow-2xl"/>
+                </div>
+
+                {/* Close Button */}
+                <button onClick={onClose} className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full bg-black/30" aria-label="סגור תצוגה מקדימה">
+                    <XMarkIcon className="h-8 w-8" />
+                </button>
+
+                {/* Navigation */}
+                {images.length > 1 && (
+                    <>
+                        <button 
+                            onClick={() => onNavigate((currentIndex - 1 + images.length) % images.length)}
+                            className="absolute left-4 top-1/2 -translate-y-1/2 p-3 text-slate-300 hover:text-white rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+                            aria-label="התמונה הקודמת"
+                        >
+                            <ChevronLeftIcon className="h-8 w-8" />
+                        </button>
+                        <button 
+                            onClick={() => onNavigate((currentIndex + 1) % images.length)}
+                            className="absolute right-4 top-1/2 -translate-y-1/2 p-3 text-slate-300 hover:text-white rounded-full bg-black/40 hover:bg-black/60 transition-colors"
+                            aria-label="התמונה הבאה"
+                        >
+                            <ChevronRightIcon className="h-8 w-8" />
+                        </button>
+                    </>
+                )}
+                
+                {/* Counter */}
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/50 text-slate-200 text-sm font-mono rounded-full">
+                    {currentIndex + 1} / {images.length}
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const App: React.FC = () => {
@@ -369,12 +544,18 @@ const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // New UI State
+  const [mode, setMode] = useState<Mode>('create');
+  const [isCreationPanelOpen, setCreationPanelOpen] = useState(true);
+  
   // UX Features State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [promptSuggestions, setPromptSuggestions] = useState<string[]>([]);
   const [creations, setCreations] = useState<Creation[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [isGalleryOpen, setIsGalleryOpen] = useState(true);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
 
   // API Key State
   const [hasSelectedApiKey, setHasSelectedApiKey] = useState(false);
@@ -385,7 +566,6 @@ const App: React.FC = () => {
   const [isVerifyingKey, setIsVerifyingKey] = useState<boolean>(false);
   const [isManagingKey, setIsManagingKey] = useState<boolean>(false);
 
-
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'model', text: string }[]>([]);
@@ -393,19 +573,31 @@ const App: React.FC = () => {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
 
-
-  // Resize state
+  // Editing state
   const [originalImageDimensions, setOriginalImageDimensions] = useState<{width: number, height: number} | null>(null);
   const [resizeWidth, setResizeWidth] = useState<string>('');
   const [resizeHeight, setResizeHeight] = useState<string>('');
   const [keepAspectRatio, setKeepAspectRatio] = useState<boolean>(true);
   const [isResizing, setIsResizing] = useState<boolean>(false);
-
-  // Editing state
   const [adjustments, setAdjustments] = useState<Adjustment>(INITIAL_ADJUSTMENTS);
   const [isApplyingEdits, setIsApplyingEdits] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'resize' | 'edit'>('resize');
+  const [activeTool, setActiveTool] = useState<ActiveTool>('resize');
+  const [editHistory, setEditHistory] = useState<ImageState[]>([]);
   
+  // Inpainting State
+  const [inpaintingPrompt, setInpaintingPrompt] = useState('');
+  const [brushSize, setBrushSize] = useState(40);
+  const [isApplyingInpainting, setIsApplyingInpainting] = useState(false);
+  const imageForInpaintingRef = useRef<HTMLImageElement>(null);
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null);
+  const [isMaskDrawn, setIsMaskDrawn] = useState(false);
+  const [brushCursor, setBrushCursor] = useState({ visible: false, x: 0, y: 0 });
+
+
+  // Zoom & Pan state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+
   const isEditing = useMemo(() => JSON.stringify(adjustments) !== JSON.stringify(INITIAL_ADJUSTMENTS), [adjustments]);
 
   const showToast = useCallback((message: string) => {
@@ -420,7 +612,6 @@ const App: React.FC = () => {
   useEffect(() => {
     const checkApiKey = async () => {
       setIsCheckingApiKey(true);
-      // Check for manual key first
       const savedKey = localStorage.getItem('gemini-studio-manual-key');
       if (savedKey) {
         setValidManualApiKey(savedKey);
@@ -428,20 +619,18 @@ const App: React.FC = () => {
         setIsCheckingApiKey(false);
         return;
       }
-
-      // Then check for aistudio key
       // @ts-ignore
       if (window.aistudio) {
         try {
           // @ts-ignore
           const hasKey = await window.aistudio.hasSelectedApiKey();
           if (hasKey) {
-            showToast("אפשר להתחיל לשוחח עם Gemini! לחצו על הכפתור בפינה.");
+              showToast("אפשר להתחיל לשוחח עם Gemini! לחצו על הכפתור בפינה.");
           }
           setHasSelectedApiKey(hasKey);
         } catch (e) {
           console.error("Error checking for API key:", e);
-          setHasSelectedApiKey(false); // Assume no key on error
+          setHasSelectedApiKey(false);
         }
       } else {
         setHasSelectedApiKey(false);
@@ -449,9 +638,17 @@ const App: React.FC = () => {
       setIsCheckingApiKey(false);
     };
     checkApiKey();
+    const tutorialSeen = localStorage.getItem('gemini-studio-tutorial-seen');
+    if (!tutorialSeen) {
+        setShowTutorial(true);
+    }
   }, [showToast]);
 
-  // Load creations from IndexedDB on mount
+  const handleCloseTutorial = () => {
+    setShowTutorial(false);
+    localStorage.setItem('gemini-studio-tutorial-seen', 'true');
+  };
+
   useEffect(() => {
     const loadCreations = async () => {
         try {
@@ -466,6 +663,17 @@ const App: React.FC = () => {
     loadCreations();
   }, [showToast]);
 
+  useEffect(() => {
+    if (sourceImages.length > 0 && mode === 'create') {
+        setMode('edit');
+    } else if (sourceImages.length === 0 && mode !== 'create') {
+        setMode('create');
+    } else if (sourceImages.length > 1 && mode !== 'combine') {
+        setMode('combine');
+    } else if (sourceImages.length === 1 && mode === 'combine') {
+        setMode('edit');
+    }
+  }, [sourceImages, mode]);
 
   const aspectRatios: { value: AspectRatio; label: string; icon: React.FC<{className?: string}> }[] = [
     { value: '1:1', label: 'ריבוע', icon: AspectRatioSquareIcon },
@@ -476,40 +684,33 @@ const App: React.FC = () => {
   ];
   
   const { buttonText, promptLabel, isSubmittable } = useMemo(() => {
-    const sourceCount = sourceImages.length;
     const hasPrompt = prompt.trim() !== '';
     const hasStyles = selectedStyles.length > 0;
-
-    let btnText, pLabel;
     
-    if (sourceCount === 0) {
-      if (hasStyles) {
-        btnText = 'צור עם סגנון';
-        pLabel = 'הוסף הנחיה (אופציונלי) לדיוק הסגנון';
-      } else {
-        btnText = 'צור תמונה';
-        pLabel = 'הנחיה ליצירה';
-      }
-    } else {
-      if (hasStyles && !hasPrompt) {
-        btnText = 'החל סגנון';
-        pLabel = 'הוסף הנחיה (אופציונלי) לדיוק הסגנון';
-      } else {
-        btnText = sourceCount === 1 ? 'החל עריכה' : 'חבר תמונות';
-        pLabel = sourceCount === 1 ? 'הנחיה לעריכה' : 'איך לחבר את התמונות?';
-      }
+    let btnText = "צור";
+    let pLabel = "הנחיה ליצירה";
+
+    switch(mode) {
+        case 'create':
+            btnText = "צור תמונה";
+            pLabel = hasStyles ? 'הוסף הנחיה (אופציונלי) לדיוק הסגנון' : 'הנחיה ליצירה';
+            break;
+        case 'edit':
+             btnText = hasPrompt ? 'החל עריכה' : 'החל סגנון';
+             pLabel = 'הנחיה לעריכה (לדוגמה: "הוסף משקפי שמש")';
+            break;
+        case 'combine':
+            btnText = "חבר תמונות";
+            pLabel = "איך לחבר את התמונות?";
+            break;
     }
     
-    const submittable = hasPrompt || hasStyles;
+    const submittable = hasPrompt || hasStyles || (mode !== 'create' && sourceImages.length > 0);
 
     return { buttonText: btnText, promptLabel: pLabel, isSubmittable: submittable };
-  }, [prompt, sourceImages.length, selectedStyles]);
+  }, [prompt, sourceImages.length, selectedStyles, mode]);
 
   const handleStyleClick = (styleKey: StyleKey) => {
-    if (styleKey === 'ללא') {
-        setSelectedStyles([]);
-        return;
-    }
     setSelectedStyles(prev => {
         const isSelected = prev.includes(styleKey);
         if (isSelected) {
@@ -532,7 +733,6 @@ const App: React.FC = () => {
     
     const newImages = await Promise.all(imagePromises);
     setSourceImages(prev => [...prev, ...newImages]);
-    setResultImage(null);
     setError(null);
   }, []);
 
@@ -540,20 +740,39 @@ const App: React.FC = () => {
     setSourceImages(prev => prev.filter(img => img.id !== id));
   };
   
+  const handleClearMask = () => {
+    const canvas = maskCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (ctx && canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    setIsMaskDrawn(false);
+  };
+
   const resetResultState = () => {
     setResultImage(null);
     setOriginalImageDimensions(null);
     setResizeWidth('');
     setResizeHeight('');
     setAdjustments(INITIAL_ADJUSTMENTS);
-    setActiveTab('resize');
+    setActiveTool('resize');
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setEditHistory([]);
+    setInpaintingPrompt('');
+    handleClearMask();
   };
 
   const handleUseAsSource = () => {
     if (resultImage) {
-      setSourceImages(prev => [...prev, {...resultImage, id: `result-${Date.now()}`}]);
+      if (mode === 'edit' || (mode === 'combine' && sourceImages.length === 1)) {
+        setSourceImages([{ ...resultImage, id: `source-${Date.now()}` }]);
+        showToast("התמונה המעודכנת הפכה למקור");
+      } else {
+        setSourceImages(prev => [...prev, { ...resultImage, id: `result-${Date.now()}` }]);
+        showToast("התמונה הוספה למקור");
+      }
       resetResultState();
-      showToast("התמונה הוספה למקור");
     }
   };
   
@@ -579,6 +798,7 @@ const App: React.FC = () => {
     resetResultState();
     setIsResizing(false);
     setIsApplyingEdits(false);
+    setIsApplyingInpainting(false);
     setPromptSuggestions([]);
   };
   
@@ -616,10 +836,10 @@ const App: React.FC = () => {
     try {
       let result: { base64: string; mimeType: string; };
 
-      if (sourceImages.length > 0) {
+      if (mode === 'edit' || mode === 'combine') {
         const imagePayload = sourceImages.map(img => ({ base64: img.base64, mimeType: img.mimeType }));
         result = await generateFromImagesAndPrompt(imagePayload, finalPrompt, validManualApiKey ?? undefined);
-      } else {
+      } else { // 'create' mode
         result = await generateImageWithGemini(finalPrompt, aspectRatio, validManualApiKey ?? undefined);
       }
       
@@ -639,14 +859,15 @@ const App: React.FC = () => {
       });
 
       setResultImage(newImageState);
+      // setPrompt(''); // Keep prompt after generation
 
       const newCreation: Creation = {
         id: `creation-${Date.now()}`,
         image: newImageState,
         prompt: prompt.trim(),
         styles: selectedStyles,
-        model: sourceImages.length > 0 ? 'gemini-flash' : 'imagen',
-        aspectRatio: sourceImages.length === 0 ? aspectRatio : undefined,
+        model: mode !== 'create' ? 'gemini-flash' : 'imagen',
+        aspectRatio: mode === 'create' ? aspectRatio : undefined,
       };
       
       try {
@@ -655,10 +876,8 @@ const App: React.FC = () => {
       } catch (dbError) {
         console.error("Failed to save creation to DB", dbError);
         showToast("השמירה בגלריה נכשלה.");
-        setCreations(prev => [newCreation, ...prev]); // Optimistically update UI anyway
+        setCreations(prev => [newCreation, ...prev]);
       }
-
-      setPrompt('');
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "אירעה שגיאה לא ידועה.";
@@ -754,9 +973,32 @@ const App: React.FC = () => {
     }
   };
 
-  const handleResize = async () => {
+  const applyCanvasChange = async (getCanvas: () => Promise<HTMLCanvasElement>) => {
     if (!resultImage) return;
 
+    if(resultImage) setEditHistory(prev => [...prev, resultImage]);
+
+    try {
+        const canvas = await getCanvas();
+        const editedDataUrl = canvas.toDataURL(resultImage.mimeType);
+        const editedBase64 = editedDataUrl.split(',')[1];
+        const newImageState = { ...resultImage, dataUrl: editedDataUrl, base64: editedBase64 };
+
+        const img = new Image();
+        img.onload = () => {
+            setResultImage(newImageState);
+            setOriginalImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+            setResizeWidth(img.naturalWidth.toString());
+            setResizeHeight(img.naturalHeight.toString());
+        }
+        img.src = editedDataUrl;
+    } catch (err) {
+        setError(err instanceof Error ? err.message : "אירעה שגיאה בעת החלת העריכות.");
+        setEditHistory(prev => prev.slice(0, -1)); // Revert history on error
+    }
+  };
+
+  const handleResize = async () => {
     const width = parseInt(resizeWidth, 10);
     const height = parseInt(resizeHeight, 10);
 
@@ -767,36 +1009,22 @@ const App: React.FC = () => {
 
     setIsResizing(true);
     setError(null);
-
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        throw new Error("לא ניתן היה לקבל את קונטקסט הציור של הקנבס.");
-      }
-      ctx.imageSmoothingQuality = 'high';
-
-      await new Promise<void>((resolve, reject) => {
+    await applyCanvasChange(() => new Promise((resolve, reject) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return reject("לא ניתן היה לקבל את קונטקסט הציור של הקנבס.");
+        
         const img = new Image();
         img.onload = () => {
-          ctx.drawImage(img, 0, 0, width, height);
-          const resizedDataUrl = canvas.toDataURL(resultImage.mimeType);
-          const resizedBase64 = resizedDataUrl.split(',')[1];
-          
-          setResultImage(prev => prev ? { ...prev, dataUrl: resizedDataUrl, base64: resizedBase64 } : null);
-          setOriginalImageDimensions({ width, height });
-          resolve();
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas);
         };
-        img.onerror = () => reject(new Error("שגיאה בטעינת התמונה המקורית לצורך שינוי גודל."));
-        img.src = resultImage.dataUrl;
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "אירעה שגיאה בשינוי גודל התמונה.");
-    } finally {
-      setIsResizing(false);
-    }
+        img.onerror = reject;
+        img.src = resultImage!.dataUrl;
+    }));
+    setIsResizing(false);
   };
   
   const handleAdjustmentChange = (name: keyof Adjustment, value: string) => {
@@ -808,43 +1036,125 @@ const App: React.FC = () => {
   };
   
   const handleApplyEdits = async () => {
-    if (!resultImage) return;
-
     setIsApplyingEdits(true);
     setError(null);
+    await applyCanvasChange(() => new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject("לא ניתן היה לקבל את קונטקסט הציור של הקנבס.");
+            
+            ctx.filter = generateFilterString(adjustments);
+            ctx.drawImage(img, 0, 0);
+            resolve(canvas);
+        };
+        img.onerror = reject;
+        img.crossOrigin = 'anonymous';
+        img.src = resultImage!.dataUrl;
+    }));
+    setAdjustments(INITIAL_ADJUSTMENTS);
+    setIsApplyingEdits(false);
+  };
+
+  const handleApplyInpainting = async () => {
+    if (!resultImage || !inpaintingPrompt.trim()) return;
+    const maskCanvas = maskCanvasRef.current;
+    if (!maskCanvas) return;
+
+    // Check if mask is empty
+    const ctx = maskCanvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    const imageData = ctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+    if (!imageData.data.some(channel => channel !== 0)) {
+        showToast("אנא ציירו מסכה על האזור לעריכה.");
+        return;
+    }
+
+    setIsApplyingInpainting(true);
+    setError(null);
+
+    // Create a new canvas for the final mask (black background, white drawing)
+    const finalMaskCanvas = document.createElement('canvas');
+    finalMaskCanvas.width = maskCanvas.width;
+    finalMaskCanvas.height = maskCanvas.height;
+    const finalMaskCtx = finalMaskCanvas.getContext('2d');
+    if (!finalMaskCtx) {
+        setError("לא ניתן היה ליצור קנבס למסכה.");
+        setIsApplyingInpainting(false);
+        return;
+    }
+
+    finalMaskCtx.fillStyle = 'black';
+    finalMaskCtx.fillRect(0, 0, finalMaskCanvas.width, finalMaskCanvas.height);
+    finalMaskCtx.drawImage(maskCanvas, 0, 0);
+
+    const maskDataUrl = finalMaskCanvas.toDataURL('image/png');
+    const maskBase64 = maskDataUrl.split(',')[1];
+    const maskImage = { base64: maskBase64, mimeType: 'image/png' };
+
+    if(resultImage) setEditHistory(prev => [...prev, resultImage]);
 
     try {
-      const canvas = document.createElement('canvas');
-      const img = new Image();
-      
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => {
-          canvas.width = img.naturalWidth;
-          canvas.height = img.naturalHeight;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            return reject(new Error("לא ניתן היה לקבל את קונטקסט הציור של הקנבס."));
-          }
-          
-          ctx.filter = generateFilterString(adjustments);
-          ctx.drawImage(img, 0, 0);
+        const result = await generateInpaintingFromImagesAndPrompt(
+            resultImage,
+            maskImage,
+            inpaintingPrompt,
+            validManualApiKey ?? undefined
+        );
+        
+        const { base64, mimeType } = result;
+        const dataUrl = `data:${mimeType};base64,${base64}`;
 
-          const editedDataUrl = canvas.toDataURL(resultImage.mimeType);
-          const editedBase64 = editedDataUrl.split(',')[1];
-          
-          setResultImage(prev => prev ? { ...prev, dataUrl: editedDataUrl, base64: editedBase64 } : null);
-          setAdjustments(INITIAL_ADJUSTMENTS);
-          resolve();
-        };
-        img.onerror = () => reject(new Error("שגיאה בטעינת התמונה לצורך עריכה."));
-        img.crossOrigin = 'anonymous';
-        img.src = resultImage.dataUrl;
-      });
+        const newImageState = await new Promise<ImageState>((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                setOriginalImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+                setResizeWidth(img.naturalWidth.toString());
+                setResizeHeight(img.naturalHeight.toString());
+                resolve({ id: `result-${Date.now()}`, dataUrl, mimeType, base64 });
+            };
+            img.onerror = () => reject(new Error("שגיאה בטעינת התמונה הערוכה."));
+            img.src = dataUrl;
+        });
+
+        setResultImage(newImageState);
+        handleClearMask();
+        setInpaintingPrompt('');
+
     } catch (err) {
-      setError(err instanceof Error ? err.message : "אירעה שגיאה בעת החלת העריכות.");
+        const errorMessage = err instanceof Error ? err.message : "אירעה שגיאה לא ידועה.";
+        setError(errorMessage);
+        setEditHistory(prev => prev.slice(0, -1)); // Revert history on error
     } finally {
-      setIsApplyingEdits(false);
+        setIsApplyingInpainting(false);
     }
+  };
+
+  const handleUndo = () => {
+      if(editHistory.length === 0) return;
+      const lastState = editHistory[editHistory.length-1];
+      setResultImage(lastState);
+      setEditHistory(prev => prev.slice(0, -1));
+      
+      const img = new Image();
+      img.onload = () => {
+        setOriginalImageDimensions({width: img.naturalWidth, height: img.naturalHeight});
+        setResizeWidth(img.naturalWidth.toString());
+        setResizeHeight(img.naturalHeight.toString());
+      }
+      img.src = lastState.dataUrl;
+
+      showToast("הפעולה האחרונה בוטלה");
+  };
+
+  const handleSetResolution = (width: number, height: number) => {
+    setResizeWidth(width.toString());
+    setResizeHeight(height.toString());
+    setKeepAspectRatio(false);
+    showToast(`הרזולוציה הוגדרה ל-${width}x${height}`);
   };
 
   const handlePaste = useCallback(async (event: ClipboardEvent) => {
@@ -889,6 +1199,7 @@ const App: React.FC = () => {
 
   const handleUseGalleryImageAsSource = (creation: Creation) => {
     setSourceImages(prev => [...prev, creation.image]);
+    setIsGalleryOpen(false);
     showToast("התמונה מהגלריה הוספה למקור");
   };
 
@@ -938,7 +1249,7 @@ const App: React.FC = () => {
       const hasKey = await window.aistudio.hasSelectedApiKey();
       setHasSelectedApiKey(hasKey);
       if (hasKey) {
-          handleClearManualKey(); // Prioritize aistudio key if selected
+          handleClearManualKey();
           setIsManagingKey(false);
       }
     } catch (e) {
@@ -963,7 +1274,7 @@ const App: React.FC = () => {
         setValidManualApiKey(manualApiKeyInput);
         localStorage.setItem('gemini-studio-manual-key', manualApiKeyInput);
         showToast("מפתח ה-API נשמר ואומת בהצלחה!");
-        setHasSelectedApiKey(false); // Unset aistudio key preference
+        setHasSelectedApiKey(false);
         setIsManagingKey(false);
     } catch (err) {
         const errorMessage = err instanceof Error ? err.message : "אירעה שגיאה לא ידועה באימות המפתח.";
@@ -1006,14 +1317,38 @@ const App: React.FC = () => {
     }
   };
 
+  const handleResetZoomAndPan = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+  
+  const handleDrawOnMask = () => {
+    if (!isMaskDrawn) {
+        setIsMaskDrawn(true);
+    }
+  };
+
+  const handleCursorMove = (e: React.MouseEvent) => {
+      if (activeTool === 'inpaint' && resultImage) {
+        setBrushCursor({ visible: true, x: e.clientX, y: e.clientY });
+      } else {
+        handleCursorLeave();
+      }
+  };
+
+  const handleCursorLeave = () => {
+    setBrushCursor({ visible: false, x: 0, y: 0 });
+  };
+
+
 
   const sourceCount = sourceImages.length;
-  const isBusy = isLoading || isResizing || isApplyingEdits || isAnalyzing;
+  const isBusy = isLoading || isResizing || isApplyingEdits || isAnalyzing || isApplyingInpainting;
   
   if (isCheckingApiKey) {
       return (
         <div className="flex items-center justify-center min-h-screen">
-            <SpinnerIcon className="h-12 w-12 text-sky-400 animate-spin" />
+            <SpinnerIcon className="h-12 w-12 text-purple-400 animate-spin" />
         </div>
       );
   }
@@ -1022,23 +1357,23 @@ const App: React.FC = () => {
     return (
         <div className="bg-transparent text-slate-200 min-h-screen flex items-center justify-center p-4">
              <main className="container mx-auto max-w-4xl px-4 py-8">
-                 <div className="text-center bg-slate-900/50 backdrop-blur-xl p-8 sm:p-12 rounded-2xl shadow-2xl ring-1 ring-white/10">
+                 <div className="text-center bg-slate-900/50 backdrop-blur-xl p-8 sm:p-12 rounded-2xl shadow-2xl shadow-black ring-1 ring-slate-400/20">
                      <KeyIcon className="mx-auto h-12 w-12 text-slate-500 mb-4" />
-                     <h1 className="text-3xl font-bold text-slate-200">נדרש מפתח API של Gemini</h1>
+                     <h1 className="text-3xl font-bold text-slate-200 bg-clip-text text-transparent bg-gradient-to-br from-cyan-400 via-purple-500 to-pink-500">נדרש מפתח API של Gemini</h1>
                      <p className="mt-2 text-slate-400 max-w-2xl mx-auto">
                          כדי ליצור ולערוך תמונות, יש לספק מפתח API מפרויקט Google Cloud עם חיובים פעילים.
-                         <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:underline mx-1">למידע נוסף על חיובים</a>.
+                         <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline mx-1">למידע נוסף על חיובים</a>.
                      </p>
                      
                      <div className="grid md:grid-cols-2 gap-6 items-start mt-8 text-left">
                          {/* Option 1: aistudio */}
                          <div className="bg-slate-800/50 p-6 rounded-xl ring-1 ring-slate-700 h-full flex flex-col">
-                             <h3 className="text-lg font-semibold text-sky-400">אפשרות 1: בחר מפתח (מומלץ)</h3>
+                             <h3 className="text-lg font-semibold text-cyan-400">אפשרות 1: בחר מפתח (מומלץ)</h3>
                              <p className="text-sm text-slate-400 mt-2 mb-4 flex-grow">השתמש בדיאלוג המובנה כדי לבחור מפתח קיים מהפרויקט שלך. זו הדרך המהירה והקלה ביותר.</p>
                              <button
                                  onClick={handleSelectKey}
                                  disabled={apiKeySelectionInProgress}
-                                 className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-semibold rounded-md shadow-lg text-white bg-gradient-to-br from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:opacity-50"
+                                 className="w-full inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-semibold rounded-md shadow-lg text-white bg-gradient-to-br from-cyan-500 to-purple-600 hover:from-cyan-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 focus:ring-offset-slate-900 disabled:opacity-50"
                              >
                                  {apiKeySelectionInProgress ? <SpinnerIcon className="h-5 w-5 mr-2 animate-spin" /> : <KeyIcon className="h-5 w-5 mr-2" />}
                                  {apiKeySelectionInProgress ? 'ממתין לבחירה...' : 'בחר מפתח API'}
@@ -1047,7 +1382,7 @@ const App: React.FC = () => {
  
                          {/* Option 2: Manual entry */}
                          <div className="bg-slate-800/50 p-6 rounded-xl ring-1 ring-slate-700 h-full flex flex-col">
-                             <h3 className="text-lg font-semibold text-violet-400">אפשרות 2: הזן מפתח ידנית</h3>
+                             <h3 className="text-lg font-semibold text-purple-400">אפשרות 2: הזן מפתח ידנית</h3>
                              <p className="text-sm text-slate-400 mt-2 mb-4 flex-grow">הדבק מפתח API שנוצר ב-Google AI Studio. המפתח יישמר בדפדפן שלך.</p>
                              {validManualApiKey ? (
                                 <div className="space-y-3">
@@ -1064,13 +1399,13 @@ const App: React.FC = () => {
                                          value={manualApiKeyInput}
                                          onChange={(e) => setManualApiKeyInput(e.target.value)}
                                          placeholder="הדבק את מפתח ה-API כאן"
-                                         className="flex-grow bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-violet-500 focus:border-violet-500 sm:text-sm text-slate-200 placeholder-slate-500"
+                                         className="flex-grow bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500"
                                          disabled={isVerifyingKey}
                                      />
                                      <button
                                          type="submit"
                                          disabled={isVerifyingKey}
-                                         className="inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 focus:ring-offset-slate-900 disabled:opacity-50"
+                                         className="inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 focus:ring-offset-slate-900 disabled:opacity-50"
                                      >
                                          {isVerifyingKey ? <SpinnerIcon className="h-4 w-4 animate-spin"/> : <CheckIcon className="h-4 w-4"/>}
                                      </button>
@@ -1096,314 +1431,414 @@ const App: React.FC = () => {
  }
 
   return (
-    <div className="bg-transparent text-slate-200 min-h-screen" onDragEnter={handleDragEnter}>
-      <main className="container mx-auto max-w-7xl px-4 py-8 md:py-12">
-        <header className="flex justify-between items-center mb-10">
-          <div className="text-left">
-            <h1 className="text-4xl md:text-5xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-white to-slate-400">
-              סטודיו התמונות של Gemini
-            </h1>
-            <p className="mt-3 max-w-2xl text-lg text-slate-400">
-              צרו תמונות חדשות, ערכו קיימות, או חברו מספר תמונות יחד בעזרת הנחיות טקסט.
-            </p>
-          </div>
-          <button
-              onClick={() => setIsManagingKey(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-slate-300 bg-slate-800/50 hover:bg-slate-700/50 ring-1 ring-slate-700 transition-colors"
-              aria-label="נהל מפתח API"
-          >
-              <KeyIcon className="h-5 w-5" />
-              <span>נהל מפתח API</span>
+    <div className={`h-screen w-screen flex flex-col text-slate-200 ${isLoading ? 'is-loading' : ''}`} onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+      {/* Custom Brush Cursor */}
+      {brushCursor.visible && (
+        <div
+            className="fixed pointer-events-none rounded-full border-2 border-white bg-black/30 -translate-x-1/2 -translate-y-1/2 z-[1002] transition-all duration-75"
+            style={{
+                left: brushCursor.x,
+                top: brushCursor.y,
+                width: brushSize,
+                height: brushSize,
+            }}
+        />
+      )}
+      
+      {/* Header */}
+      <header className="flex-shrink-0 h-[64px] flex items-center justify-between px-6 bg-slate-950/50 backdrop-blur-lg border-b border-slate-400/20 z-[60] shadow-2xl shadow-black/50">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-br from-cyan-400 via-purple-500 to-pink-500">
+            סטודיו התמונות של Gemini
+          </h1>
+        </div>
+
+        {/* Mode Switcher */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2 rounded-lg bg-black/20 p-1 ring-1 ring-slate-700">
+            {(
+                [
+                    {key: 'create', label: 'צור', icon: SparklesIcon},
+                    {key: 'edit', label: 'ערוך', icon: PencilIcon},
+                    {key: 'combine', label: 'חבר', icon: Square2StackIcon},
+                ] as const
+            ).map(({key, label, icon: Icon}) => (
+                <button
+                    key={key}
+                    onClick={() => setMode(key)}
+                    disabled={isBusy}
+                    className={`flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 disabled:opacity-50 ${
+                        mode === key ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    }`}
+                >
+                    <Icon className="h-4 w-4" />
+                    <span>{label}</span>
+                </button>
+            ))}
+        </div>
+
+        <div className="flex items-center gap-4">
+          <button onClick={() => setIsGalleryOpen(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-slate-300 bg-slate-800/50 hover:bg-slate-700/50 ring-1 ring-slate-700 transition-colors">
+            <Squares2X2Icon className="h-5 w-5"/>
+            <span>גלריה ({creations.length})</span>
           </button>
-        </header>
+          <button onClick={() => setIsManagingKey(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md text-slate-300 bg-slate-800/50 hover:bg-slate-700/50 ring-1 ring-slate-700 transition-colors" aria-label="נהל מפתח API">
+              <KeyIcon className="h-5 w-5" />
+          </button>
+        </div>
+      </header>
+      
+      {/* Main Content */}
+      <main className="flex-grow relative overflow-hidden">
+        <div className="absolute inset-0 p-8 pt-0 flex items-center justify-center">
+             <CanvasDisplay 
+                imageState={resultImage} 
+                isLoading={isLoading || isApplyingInpainting} 
+                adjustments={adjustments}
+                zoom={zoom}
+                pan={pan}
+                onZoomChange={setZoom}
+                onPanChange={setPan}
+                onResetZoomAndPan={handleResetZoomAndPan}
+                activeTool={activeTool}
+                brushSize={brushSize}
+                imageForInpaintingRef={imageForInpaintingRef}
+                maskCanvasRef={maskCanvasRef}
+                onDrawOnMask={handleDrawOnMask}
+                onCursorMove={handleCursorMove}
+                onCursorLeave={handleCursorLeave}
+            />
+        </div>
+      </main>
 
-        <>
-            <div className="grid lg:grid-cols-2 gap-8 items-start">
-                <div className="flex flex-col gap-8">
-                    <div id="source-images-panel" className="relative bg-slate-900/50 backdrop-blur-xl p-4 rounded-2xl shadow-2xl ring-1 ring-white/10"
-                        onDragLeave={handleDragLeave}
-                        onDragOver={handleDragOver}
-                        onDrop={handleDrop}
-                    >
-                        {isDragging && (
-                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center text-center p-4 z-10 border-2 border-dashed border-sky-500 transition-all duration-300">
-                                <UploadIcon className="w-12 h-12 text-sky-400 mb-4 animate-bounce" />
-                                <p className="text-lg font-semibold text-slate-200">שחררו את הקבצים כאן</p>
-                                <p className="text-sm text-slate-400">ניתן להוסיף קבצי PNG, JPG, או WEBP</p>
-                            </div>
-                        )}
-                        <h2 className="text-xl font-semibold text-slate-200 mb-1 pl-1">תמונות מקור ({sourceCount})</h2>
-                        <p className="text-xs text-slate-500 mb-3 pl-1">גררו קבצים, לחצו על '+' או הדביקו תמונה (Ctrl+V).</p>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-5 gap-4 p-4 rounded-lg bg-black/20 transition-all duration-300 min-h-[120px]">
-                            {sourceImages.map(image => (
-                                <div key={image.id} className="aspect-square rounded-md overflow-hidden relative group shadow-md">
-                                    <img src={image.dataUrl} alt="Source thumbnail" className="w-full h-full object-cover"/>
-                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                        <button onClick={() => handleRemoveImage(image.id)} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-red-500 transition-colors">
-                                            <XMarkIcon className="h-4 w-4" />
-                                        </button>
-                                    </div>
+      {/* Creation Panel (Right) */}
+      <div id="creation-panel" className={`floating-panel left ${isCreationPanelOpen ? '' : 'hidden'}`}>
+        <div className="floating-panel-content">
+            <div className="flex-shrink-0 p-4 border-b border-white/10">
+                <h2 className="text-xl font-semibold text-slate-200">יצירה ועריכה</h2>
+            </div>
+            <div className="flex-grow p-4 panel-scroll-content">
+                <form onSubmit={handleSubmit} className="space-y-6">
+                    {mode !== 'create' && (
+                        <div id="source-images-panel" className="relative">
+                             {isDragging && (
+                                <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm rounded-lg flex flex-col items-center justify-center text-center p-4 z-10 border-2 border-dashed border-purple-500">
+                                    <UploadIcon className="w-10 h-10 text-purple-400 mb-2 animate-bounce" />
+                                    <p className="text-md font-semibold text-slate-200">שחררו את הקבצים כאן</p>
                                 </div>
-                            ))}
-                            <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={handleFileChange}
-                            className="hidden"
-                            accept="image/png, image/jpeg, image/webp"
-                            disabled={isBusy}
-                            multiple
-                            />
-                            <button 
-                                onClick={() => fileInputRef.current?.click()}
-                                disabled={isBusy}
-                                className="aspect-square rounded-md border-2 border-dashed border-slate-700 text-slate-500 flex flex-col items-center justify-center hover:bg-slate-800/50 hover:border-sky-500 hover:text-sky-400 transition-all duration-200 disabled:opacity-50"
-                                aria-label="הוספת תמונות"
-                            >
-                                <PlusIcon className="h-8 w-8"/>
-                                <span className="text-xs mt-1">הוסף</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div className="lg:hidden">
-                        <ResultDisplay 
-                        imageState={resultImage} 
-                        isLoading={isLoading} 
-                        onDownload={handleDownload} 
-                        onUseAsSource={handleUseAsSource}
-                        isResizing={isResizing}
-                        resizeWidth={resizeWidth}
-                        resizeHeight={resizeHeight}
-                        onWidthChange={handleWidthChange}
-                        onHeightChange={handleHeightChange}
-                        keepAspectRatio={keepAspectRatio}
-                        onKeepAspectRatioChange={handleKeepAspectRatioChange}
-                        onResize={handleResize}
-                        adjustments={adjustments}
-                        onAdjustmentChange={handleAdjustmentChange}
-                        onSetAdjustments={setAdjustments}
-                        onApplyEdits={handleApplyEdits}
-                        onResetEdits={handleResetEdits}
-                        isEditing={isEditing}
-                        isApplyingEdits={isApplyingEdits}
-                        activeTab={activeTab}
-                        onTabChange={setActiveTab}
-                        />
-                    </div>
-
-                    <div className="w-full">
-                    <form onSubmit={handleSubmit} className="space-y-6 bg-slate-900/50 backdrop-blur-xl p-6 rounded-2xl shadow-2xl ring-1 ring-white/10">
-                        <div id="style-selector">
-                        <label className="block text-sm font-semibold text-slate-300 mb-2">סגנון</label>
-                        <div className="flex flex-wrap gap-2">
-                            {Object.keys(STYLES).map((styleKey) => {
-                            const isSelected = styleKey === 'ללא'
-                                ? selectedStyles.length === 0
-                                : selectedStyles.includes(styleKey as StyleKey);
-                            
-                            return (
-                                <button
-                                key={styleKey}
-                                type="button"
-                                onClick={() => handleStyleClick(styleKey as StyleKey)}
-                                disabled={isBusy}
-                                className={`px-3 py-1 text-sm font-medium rounded-full transition-all duration-200 disabled:opacity-50 ${
-                                    isSelected
-                                    ? 'bg-sky-500 text-white shadow-md ring-2 ring-sky-400'
-                                    : 'bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700'
-                                }`}
-                                >
-                                {styleKey}
+                            )}
+                            <h3 className="text-sm font-semibold text-slate-300 mb-1">תמונות מקור ({sourceCount})</h3>
+                            <p className="text-xs text-slate-500 mb-3">גררו קבצים, לחצו על '+' או הדביקו תמונה (Ctrl+V).</p>
+                            <div className="grid grid-cols-4 gap-3 p-3 rounded-lg bg-black/20 transition-all duration-300 min-h-[90px]">
+                                {sourceImages.map((image, index) => (
+                                    <div key={image.id} className="aspect-square rounded-md overflow-hidden relative group shadow-md cursor-pointer" onClick={() => setPreviewImageIndex(index)}>
+                                        <img src={image.dataUrl} alt="תמונת מקור" className="w-full h-full object-cover"/>
+                                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                            <ArrowsPointingOutIcon className="h-6 w-6 text-white pointer-events-none" />
+                                            <button onClick={(e) => { e.stopPropagation(); handleRemoveImage(image.id); }} className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-red-500 transition-colors z-10" aria-label="הסר תמונה">
+                                                <XMarkIcon className="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                                <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/png, image/jpeg, image/webp" disabled={isBusy} multiple/>
+                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy} className="aspect-square rounded-md border-2 border-dashed border-slate-700 text-slate-500 flex flex-col items-center justify-center hover:bg-slate-800/50 hover:border-purple-500 hover:text-purple-400 transition-all duration-200 disabled:opacity-50" aria-label="הוספת תמונות">
+                                    <PlusIcon className="h-6 w-6"/>
                                 </button>
-                            );
-                            })}
+                            </div>
                         </div>
-                        </div>
+                    )}
+                    
+                    <div id="style-selector">
+                        <label className="block text-sm font-semibold text-slate-300 mb-2">סגנון</label>
+                         <div className="space-y-2">
+                             {Object.entries(STYLE_CATEGORIES).map(([category, styles]) => (
+                                 <details key={category} className="bg-black/20 rounded-lg" open={category === 'תנועות אמנותיות'}>
+                                     <summary className="px-3 py-2 text-xs font-semibold text-slate-300 cursor-pointer flex justify-between items-center ring-1 ring-slate-700 rounded-lg">
+                                         {category}
+                                         <ChevronDownIcon className="h-4 w-4 transition-transform accordion-icon" />
+                                     </summary>
+                                     <div className="p-3 flex flex-wrap gap-2">
+                                         {styles.map(styleKey => (
+                                            <button key={styleKey} type="button" onClick={() => handleStyleClick(styleKey)} disabled={isBusy} className={`px-3 py-1 text-sm font-medium rounded-full transition-all duration-200 disabled:opacity-50 ${selectedStyles.includes(styleKey) ? 'text-white shadow-md ring-2 ring-purple-500 bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700'}`}>
+                                                {styleKey}
+                                            </button>
+                                         ))}
+                                     </div>
+                                 </details>
+                             ))}
+                         </div>
+                    </div>
 
-                        {sourceCount === 0 && (
+                    {mode === 'create' && (
                         <div>
                             <label className="block text-sm font-semibold text-slate-300 mb-2">יחס גובה-רוחב</label>
                             <div className="flex items-center gap-2 rounded-lg bg-black/20 p-1 ring-1 ring-slate-700">
-                            {aspectRatios.map(({ value, label, icon: Icon }) => (
-                                <button
-                                key={value}
-                                type="button"
-                                onClick={() => setAspectRatio(value)}
-                                disabled={isBusy}
-                                aria-label={label}
-                                className={`flex-1 flex flex-col items-center justify-center p-2 text-xs font-semibold rounded-md transition-all duration-200 disabled:opacity-50 ${
-                                    aspectRatio === value
-                                    ? 'bg-sky-600 text-white shadow-lg'
-                                    : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                                }`}
-                                >
-                                <Icon className="h-6 w-6 mb-1" />
-                                {label}
-                                </button>
-                            ))}
+                                {aspectRatios.map(({ value, label, icon: Icon }) => (
+                                    <button key={value} type="button" onClick={() => setAspectRatio(value)} disabled={isBusy} aria-label={label} className={`flex-1 flex flex-col items-center justify-center p-2 text-xs font-semibold rounded-md transition-all duration-200 disabled:opacity-50 ${aspectRatio === value ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
+                                        <Icon className="h-6 w-6 mb-1" />
+                                        {label}
+                                    </button>
+                                ))}
                             </div>
                         </div>
-                        )}
+                    )}
 
-                        <div>
+                    <div>
                         <div className="flex justify-between items-center mb-1">
-                            <label htmlFor="prompt" className="block text-sm font-semibold text-slate-300">
-                            {promptLabel}
-                            </label>
-                            <div className="flex items-center gap-4">
-                            <button
-                                id="prompt-analyzer-button"
-                                type="button"
-                                onClick={handleAnalyzePrompt}
-                                disabled={isBusy || !prompt.trim()}
-                                className="flex items-center gap-1 text-sm text-violet-400 hover:text-violet-300 disabled:opacity-50 transition-colors"
-                                aria-label="נתח הנחיה"
-                            >
-                                {isAnalyzing ? <SpinnerIcon className="h-4 w-4 animate-spin"/> : <BeakerIcon className="h-4 w-4" />}
-                                {isAnalyzing ? 'מנתח...' : 'נתח הנחיה'}
-                            </button>
-                            <button 
-                                type="button"
-                                onClick={handleSurpriseMe}
-                                disabled={isBusy}
-                                className="flex items-center gap-1 text-sm text-sky-400 hover:text-sky-300 disabled:opacity-50 transition-colors"
-                                aria-label="הצע הנחיה אקראית"
-                            >
+                            <label htmlFor="prompt" className="block text-sm font-semibold text-slate-300">{promptLabel}</label>
+                            <button type="button" onClick={handleSurpriseMe} disabled={isBusy} className="flex items-center gap-1 text-sm text-pink-400 hover:text-pink-300 disabled:opacity-50 transition-colors" aria-label="הצע הנחיה אקראית">
                                 <MagicWandIcon className="h-4 w-4" />
                                 הפתיעו אותי
                             </button>
-                            </div>
                         </div>
                         <textarea
-                            id="prompt-textarea"
-                            name="prompt"
-                            rows={3}
-                            className="mt-1 block w-full bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 sm:text-sm text-slate-200 placeholder-slate-500"
-                            placeholder={
-                                sourceCount === 0 ? "לדוגמה: 'אריה מלכותי עונד כתר'" :
-                                sourceCount === 1 ? "לדוגמה: 'הוסף אפקט גרעיניות של סרט רטרו'" :
-                                "לדוגמה: 'הצב את האדם מהתמונה הראשונה ברקע של התמונה השנייה'"
-                            }
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            disabled={isBusy}
-                        />
-                        </div>
+                            id="prompt-textarea" name="prompt" rows={3}
+                            className="mt-1 block w-full bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500"
+                            placeholder={mode === 'create' ? "לדוגמה: 'אריה מלכותי עונד כתר'" : mode === 'edit' ? "לדוגמה: 'הוסף אפקט גרעיניות של סרט רטרו'" : "לדוגמה: 'הצב את האדם מהתמונה הראשונה ברקע של התמונה השנייה'"}
+                            value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isBusy}/>
+                        <button id="prompt-analyzer-button" type="button" onClick={handleAnalyzePrompt} disabled={isBusy || !prompt.trim()} className="flex items-center gap-1 text-sm text-purple-400 hover:text-purple-300 disabled:opacity-50 transition-colors mt-2" aria-label="נתח הנחיה">
+                            {isAnalyzing ? <SpinnerIcon className="h-4 w-4 animate-spin"/> : <BeakerIcon className="h-4 w-4" />}
+                            {isAnalyzing ? 'מנתח...' : 'נתח וחדד הנחיה'}
+                        </button>
+
                         {promptSuggestions.length > 0 && (
-                            <div className="space-y-2">
-                                <p className="text-xs font-medium text-slate-400">הצעות לשיפור:</p>
+                            <div className="space-y-2 mt-2">
                                 <div className="flex flex-wrap gap-2">
                                     {promptSuggestions.map((suggestion, index) => (
-                                        <button
-                                            key={index}
-                                            type="button"
-                                            onClick={() => setPrompt(prev => `${prev}, ${suggestion}`)}
-                                            className="px-2.5 py-1 text-xs bg-slate-800/70 text-slate-300 rounded-full hover:bg-slate-700/70 ring-1 ring-slate-700"
-                                        >
+                                        <button key={index} type="button" onClick={() => setPrompt(prev => `${prev}, ${suggestion}`)} className="px-2.5 py-1 text-xs bg-slate-800/70 text-slate-300 rounded-full hover:bg-slate-700/70 ring-1 ring-slate-700">
                                             + {suggestion}
                                         </button>
                                     ))}
                                 </div>
                             </div>
                         )}
+                    </div>
+                </form>
+            </div>
+            <div className="flex-shrink-0 p-4 border-t border-white/10 mt-auto">
+                 {error && (
+                    <div className="mb-4 bg-red-900/30 backdrop-blur-md border border-red-700/50 text-red-300 px-4 py-3 rounded-xl text-sm" role="alert">
+                        <div className="whitespace-pre-wrap"><span className="font-bold">שגיאה:</span> {error}</div>
+                    </div>
+                )}
+                <div className="flex items-center gap-4">
+                    <button id="generate-button" type="submit" onClick={handleSubmit} disabled={isBusy || !isSubmittable} className="flex-grow inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-semibold rounded-md shadow-lg text-white bg-gradient-to-br from-cyan-500 via-purple-600 to-pink-600 hover:shadow-purple-500/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 focus:ring-offset-slate-900 disabled:bg-slate-600 disabled:from-slate-600 disabled:to-slate-700 disabled:cursor-not-allowed transition-all duration-200 disabled:shadow-none">
+                        {isLoading ? <><SpinnerIcon className="animate-spin -mr-1 ml-3 h-5 w-5" />מעבד...</> : <><SparklesIcon className="-mr-1 ml-2 h-5 w-5" />{buttonText}</>}
+                    </button>
+                    <button type="button" onClick={handleReset} disabled={isBusy} aria-label="איפוס" className="p-3 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-300 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 focus:ring-offset-slate-900 disabled:opacity-50 transition-colors">
+                        <TrashIcon className="h-5 w-5" />
+                    </button>
+                </div>
+            </div>
+        </div>
+      </div>
 
-                        <div className="flex items-center gap-4">
-                        <button
-                            id="generate-button"
-                            type="submit"
-                            disabled={isBusy || !isSubmittable}
-                            className="flex-grow inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-semibold rounded-md shadow-lg text-white bg-gradient-to-br from-sky-500 to-indigo-600 hover:from-sky-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 disabled:bg-slate-600 disabled:from-slate-600 disabled:to-slate-700 disabled:cursor-not-allowed transition-all duration-200 disabled:shadow-none hover:shadow-sky-500/50 animate-pulse-slow disabled:animate-none"
-                        >
-                            {isLoading ? (
-                            <>
-                                <SpinnerIcon className="animate-spin -mr-1 ml-3 h-5 w-5" />
-                                מעבד...
-                            </>
-                            ) : (
-                            <>
-                                <SparklesIcon className="-mr-1 ml-2 h-5 w-5" />
-                                {buttonText}
-                            </>
-                            )}
+      {/* Editing Panel (Left) */}
+       <div id="result-panel" className={`floating-panel right ${resultImage && !isLoading ? '' : 'hidden'}`}>
+            <div className="floating-panel-content">
+                <div className="flex items-center justify-between p-4 border-b border-white/10">
+                    <h2 className="text-xl font-semibold text-slate-200">כלים</h2>
+                    <button onClick={handleUndo} disabled={editHistory.length === 0 || isBusy} className="flex items-center gap-2 px-3 py-1.5 text-sm rounded-md bg-slate-700/50 hover:bg-slate-600/50 ring-1 ring-slate-600 disabled:opacity-50">
+                        <ArrowUturnLeftIcon className="h-4 w-4" />
+                        <span>בטל</span>
+                    </button>
+                </div>
+                <div className="flex-grow p-4 panel-scroll-content">
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={handleDownload} disabled={isBusy} className="inline-flex justify-center items-center px-4 py-2.5 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-50 transition-colors">
+                            <DownloadIcon className="h-5 w-5 mr-2" />
+                            <span>הורדה</span>
                         </button>
-                        <button
-                            type="button"
-                            onClick={handleReset}
-                            disabled={isBusy}
-                            aria-label="איפוס"
-                            className="p-3 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-300 bg-slate-700/50 hover:bg-slate-600/50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 focus:ring-offset-slate-900 disabled:opacity-50 transition-colors"
-                        >
-                            <TrashIcon className="h-5 w-5" />
+                        <button onClick={handleUseAsSource} disabled={isBusy} className="inline-flex justify-center items-center px-4 py-2.5 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-50 transition-colors">
+                            <ArrowPathIcon className="h-5 w-5 mr-2" />
+                            <span>השתמש כמקור</span>
                         </button>
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-white/10">
+                         <div className="flex border-b border-slate-700 mb-4">
+                            <button onClick={() => setActiveTool('resize')} className={`flex-1 text-sm font-semibold py-2 transition-all duration-200 rounded-t-md border-b-2 flex items-center justify-center gap-2 ${activeTool === 'resize' ? 'text-purple-300 border-purple-400 bg-purple-500/10' : 'text-slate-400 border-transparent hover:text-slate-100 hover:bg-slate-800/50'}`}>
+                                <ArrowsPointingOutIcon className="h-4 w-4" />
+                                <span>שינוי גודל</span>
+                            </button>
+                             <button onClick={() => setActiveTool('edit')} className={`flex-1 text-sm font-semibold py-2 transition-all duration-200 rounded-t-md border-b-2 flex items-center justify-center gap-2 ${activeTool === 'edit' ? 'text-purple-300 border-purple-400 bg-purple-500/10' : 'text-slate-400 border-transparent hover:text-slate-100 hover:bg-slate-800/50'}`}>
+                                <AdjustmentsHorizontalIcon className="h-4 w-4" />
+                                <span>עריכה</span>
+                            </button>
+                            <button onClick={() => setActiveTool('inpaint')} className={`flex-1 text-sm font-semibold py-2 transition-all duration-200 rounded-t-md border-b-2 flex items-center justify-center gap-2 ${activeTool === 'inpaint' ? 'text-purple-300 border-purple-400 bg-purple-500/10' : 'text-slate-400 border-transparent hover:text-slate-100 hover:bg-slate-800/50'}`}>
+                                <PaintBrushIcon className="h-4 w-4" />
+                                <span>עריכת קסם</span>
+                            </button>
                         </div>
-                    </form>
-                    {error && (
-                        <div className="mt-4 bg-red-900/30 backdrop-blur-md border border-red-700/50 text-red-300 px-4 py-3 rounded-xl text-sm transition-all duration-300 opacity-100" role="alert">
-                            <div className="whitespace-pre-wrap"><span className="font-bold">שגיאה:</span> {error}</div>
+                        {activeTool === 'resize' && (
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label htmlFor="resize-width" className="block text-xs font-medium text-slate-400 mb-1 text-center">רוחב (px)</label>
+                                        <input id="resize-width" type="number" value={resizeWidth} onChange={handleWidthChange} className="w-full bg-slate-900/50 border-white/10 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500 text-center" aria-label="רוחב" min="1" disabled={isResizing} />
+                                    </div>
+                                    <div>
+                                        <label htmlFor="resize-height" className="block text-xs font-medium text-slate-400 mb-1 text-center">גובה (px)</label>
+                                        <input id="resize-height" type="number" value={resizeHeight} onChange={handleHeightChange} className="w-full bg-slate-900/50 border-white/10 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500 text-center" aria-label="גובה" min="1" disabled={isResizing} />
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <label className="block text-xs font-semibold text-slate-400 mt-3 mb-2">קביעות מוגדרות מראש (16:9)</label>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <button type="button" onClick={() => handleSetResolution(1280, 720)} disabled={isResizing} className="px-2 py-1.5 text-sm font-semibold rounded-md bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700 disabled:opacity-50">
+                                            720p
+                                        </button>
+                                        <button type="button" onClick={() => handleSetResolution(1920, 1080)} disabled={isResizing} className="px-2 py-1.5 text-sm font-semibold rounded-md bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700 disabled:opacity-50">
+                                            1080p
+                                        </button>
+                                        <button type="button" onClick={() => handleSetResolution(3840, 2160)} disabled={isResizing} className="px-2 py-1.5 text-sm font-semibold rounded-md bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700 disabled:opacity-50">
+                                            4K
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center pt-2">
+                                    <input id="keep-aspect-ratio" type="checkbox" checked={keepAspectRatio} onChange={handleKeepAspectRatioChange} className="h-4 w-4 rounded border-slate-600 bg-slate-800/50 text-purple-500 focus:ring-purple-500" disabled={isResizing}/>
+                                    <label htmlFor="keep-aspect-ratio" className="mr-2 text-sm text-slate-400">שמור על יחס גובה-רוחב</label>
+                                </div>
+                                <button onClick={handleResize} disabled={isResizing} className="w-full inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-200 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-50 transition-colors">
+                                    {isResizing ? ( <><SpinnerIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />משנה גודל...</> ) : 'שנה גודל'}
+                                </button>
+                            </div>
+                        )}
+                        {activeTool === 'edit' && (
+                             <div className="space-y-4">
+                                <h3 className="text-sm font-medium text-slate-300">פילטרים</h3>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {Object.entries(FILTERS).map(([name, adj]) => (
+                                        <button key={name} onClick={() => setAdjustments(adj)} disabled={isApplyingEdits} className="text-center group disabled:opacity-50">
+                                            <div className={`w-full aspect-square rounded-md bg-slate-700 overflow-hidden ring-2 transition-all ${JSON.stringify(adj) === JSON.stringify(adjustments) ? 'ring-purple-400' : 'ring-slate-600 group-hover:ring-purple-500'}`}>
+                                                 {resultImage && <img src={resultImage.dataUrl} alt={name} className="w-full h-full object-cover" style={{filter: generateFilterString(adj)}} />}
+                                            </div>
+                                            <span className="text-xs mt-1.5 block text-slate-400 group-hover:text-slate-200">{name}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                                <h3 className="text-sm font-medium text-slate-300 pt-2">התאמות</h3>
+                                <div className="space-y-3">
+                                    <AdjustmentSlider label="בהירות" name="brightness" value={adjustments.brightness} min={0} max={200} onChange={handleAdjustmentChange} disabled={isApplyingEdits} />
+                                    <AdjustmentSlider label="ניגודיות" name="contrast" value={adjustments.contrast} min={0} max={200} onChange={handleAdjustmentChange} disabled={isApplyingEdits} />
+                                    <AdjustmentSlider label="רוויה" name="saturate" value={adjustments.saturate} min={0} max={200} onChange={handleAdjustmentChange} disabled={isApplyingEdits} />
+                                    <AdjustmentSlider label="ספיה" name="sepia" value={adjustments.sepia} min={0} max={100} onChange={handleAdjustmentChange} disabled={isApplyingEdits} />
+                                    <AdjustmentSlider label="שחור-לבן" name="grayscale" value={adjustments.grayscale} min={0} max={100} onChange={handleAdjustmentChange} disabled={isApplyingEdits} />
+                                </div>
+
+                                {isEditing && (
+                                    <div className="flex gap-3 pt-2">
+                                        <button onClick={handleApplyEdits} disabled={isApplyingEdits} className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 transition-colors">
+                                            {isApplyingEdits ? <><SpinnerIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />מחיל שינויים...</> : <><CheckIcon className="-ml-1 mr-2 h-4 w-4" />החל שינויים</>}
+                                        </button>
+                                         <button onClick={handleResetEdits} disabled={isApplyingEdits} className="w-full inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-300 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-50 transition-colors">
+                                            <ArrowUturnLeftIcon className="-ml-1 mr-2 h-4 w-4" />
+                                            אפס עריכות
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {activeTool === 'inpaint' && (
+                            <div className="space-y-4">
+                                <p className="text-sm text-slate-400">ציירו על האזור בתמונה שברצונכם לשנות, ולאחר מכן תארו את השינוי.</p>
+                                <div>
+                                    <div className="flex justify-between items-center text-xs mb-1">
+                                        <label htmlFor="brushSize" className="font-medium text-slate-300">גודל מברשת</label>
+                                        <span className="text-slate-200 font-mono bg-slate-900/50 px-1.5 py-0.5 rounded-md">{brushSize}</span>
+                                    </div>
+                                    <input
+                                        id="brushSize"
+                                        type="range"
+                                        min="10"
+                                        max="100"
+                                        value={brushSize}
+                                        onChange={(e) => setBrushSize(parseInt(e.target.value))}
+                                        disabled={isApplyingInpainting}
+                                        className="w-full h-2 bg-slate-700/50 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                    />
+                                </div>
+                                <div>
+                                    <label htmlFor="inpainting-prompt" className="block text-sm font-semibold text-slate-300">הנחיה לעריכה</label>
+                                    <textarea
+                                        id="inpainting-prompt"
+                                        rows={2}
+                                        className="mt-1 block w-full bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500"
+                                        placeholder="לדוגמה: 'הוסף ציפורים עפות'"
+                                        value={inpaintingPrompt}
+                                        onChange={(e) => setInpaintingPrompt(e.target.value)}
+                                        disabled={isApplyingInpainting}
+                                    />
+                                </div>
+                                <div className="flex gap-3 pt-2">
+                                        <button onClick={handleApplyInpainting} disabled={isApplyingInpainting || !inpaintingPrompt.trim() || !isMaskDrawn} className="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 transition-colors">
+                                            {isApplyingInpainting ? <><SpinnerIcon className="animate-spin -ml-1 mr-2 h-4 w-4" />מעבד...</> : <><MagicWandIcon className="-ml-1 mr-2 h-4 w-4" />החל שינוי</>}
+                                        </button>
+                                         <button onClick={handleClearMask} disabled={isApplyingInpainting} className="w-full inline-flex justify-center items-center px-4 py-2 border border-slate-600 text-sm font-medium rounded-md shadow-sm text-slate-300 bg-slate-700/50 hover:bg-slate-600/50 disabled:opacity-50 transition-colors">
+                                            <TrashIcon className="-ml-1 mr-2 h-4 w-4" />
+                                            נקה מסכה
+                                        </button>
+                                    </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+       </div>
+
+      {/* Gallery */}
+       {isGalleryOpen && (
+        <div className="fixed inset-0 z-[100] animate-fade-in" id="creations-gallery">
+            <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl" onClick={() => setIsGalleryOpen(false)}></div>
+            <div className="relative z-10 container mx-auto p-8 h-full flex flex-col">
+                <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-3xl font-bold text-slate-200">גלריית יצירות ({creations.length})</h2>
+                    <button onClick={() => setIsGalleryOpen(false)} className="p-2 text-slate-400 hover:text-white rounded-full bg-black/30">
+                        <XMarkIcon className="h-6 w-6" />
+                    </button>
+                </div>
+                <div className="flex-grow overflow-y-auto pr-2 -mr-4">
+                    {creations.length > 0 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                            {creations.map(creation => (
+                                <div key={creation.id} className="aspect-square rounded-xl overflow-hidden relative group shadow-lg transition-all duration-300 hover:ring-2 hover:ring-purple-500 hover:scale-105 hover:shadow-2xl hover:shadow-purple-500/30">
+                                    <img src={creation.image.dataUrl} alt={`Creation ${creation.id}`} className="w-full h-full object-cover"/>
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 text-xs flex flex-col justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <p className="text-slate-200 font-semibold line-clamp-3 overflow-hidden mb-2">{creation.prompt || creation.styles.join(', ')}</p>
+                                        <div className="flex justify-around items-center bg-slate-900/50 backdrop-blur-sm p-1 rounded-full">
+                                            <button onClick={() => handleUseGalleryImageAsSource(creation)} className="p-1.5 text-slate-300 hover:text-cyan-400" title="השתמש כמקור"><ArrowPathIcon className="h-5 w-5"/></button>
+                                            <button onClick={() => handleDownloadGalleryImage(creation)} className="p-1.5 text-slate-300 hover:text-green-400" title="הורדה"><DownloadIcon className="h-5 w-5"/></button>
+                                            <button onClick={() => handleCopyPrompt(creation)} className="p-1.5 text-slate-300 hover:text-amber-400" title="העתק הנחיה"><ClipboardDocumentIcon className="h-5 w-5"/></button>
+                                            <button onClick={() => handleDeleteCreation(creation.id)} className="p-1.5 text-slate-300 hover:text-red-400" title="מחק"><TrashIcon className="h-5 w-5"/></button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                           <Squares2X2Icon className="w-16 h-16 mb-4"/>
+                           <p>הגלריה שלך ריקה.</p>
+                           <p className="text-sm">כל יצירה שלך תישמר כאן אוטומטית.</p>
                         </div>
                     )}
-                    </div>
+                </div>
+            </div>
+        </div>
+      )}
 
-                </div>
-                <div className="hidden lg:block lg:sticky lg:top-8">
-                <ResultDisplay 
-                    imageState={resultImage} 
-                    isLoading={isLoading} 
-                    onDownload={handleDownload} 
-                    onUseAsSource={handleUseAsSource}
-                    isResizing={isResizing}
-                    resizeWidth={resizeWidth}
-                    resizeHeight={resizeHeight}
-                    onWidthChange={handleWidthChange}
-                    onHeightChange={handleHeightChange}
-                    keepAspectRatio={keepAspectRatio}
-                    onKeepAspectRatioChange={handleKeepAspectRatioChange}
-                    onResize={handleResize}
-                    adjustments={adjustments}
-                    onAdjustmentChange={handleAdjustmentChange}
-                    onSetAdjustments={setAdjustments}
-                    onApplyEdits={handleApplyEdits}
-                    onResetEdits={handleResetEdits}
-                    isEditing={isEditing}
-                    isApplyingEdits={isApplyingEdits}
-                    activeTab={activeTab}
-                    onTabChange={setActiveTab}
-                />
-                </div>
-            </div>
-            
-            <div id="creations-gallery" className="mt-12 bg-slate-900/50 backdrop-blur-xl p-4 rounded-2xl shadow-2xl ring-1 ring-white/10">
-                <button 
-                className="text-xl font-semibold text-slate-200 mb-4 pl-1 w-full text-right flex justify-between items-center"
-                onClick={() => setIsGalleryOpen(prev => !prev)}
-                >
-                <span>גלריית יצירות ({creations.length})</span>
-                <svg xmlns="http://www.w3.org/2000/svg" className={`h-5 w-5 transition-transform duration-300 ${isGalleryOpen ? 'rotate-180' : ''}`} viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-                </button>
-                {isGalleryOpen && creations.length > 0 && (
-                <div className="flex gap-4 overflow-x-auto p-4 rounded-lg bg-black/20 -mx-4 -mb-4">
-                    {creations.map(creation => (
-                        <div key={creation.id} className="flex-shrink-0 w-40 h-40 rounded-md overflow-hidden relative group shadow-md">
-                        <img src={creation.image.dataUrl} alt={`Creation ${creation.id}`} className="w-full h-full object-cover"/>
-                        <div className="absolute inset-0 bg-black/70 p-2 text-xs flex-col justify-end opacity-0 group-hover:opacity-100 transition-opacity flex">
-                            <p className="text-slate-300 line-clamp-2 overflow-hidden mb-auto">{creation.prompt || creation.styles.join(', ')}</p>
-                            <div className="flex justify-around items-center">
-                                <button onClick={() => handleUseGalleryImageAsSource(creation)} className="p-1.5 text-slate-300 hover:text-sky-400" title="השתמש כמקור"><ArrowPathIcon className="h-5 w-5"/></button>
-                                <button onClick={() => handleDownloadGalleryImage(creation)} className="p-1.5 text-slate-300 hover:text-green-400" title="הורדה"><DownloadIcon className="h-5 w-5"/></button>
-                                <button onClick={() => handleCopyPrompt(creation)} className="p-1.5 text-slate-300 hover:text-amber-400" title="העתק הנחיה"><ClipboardDocumentIcon className="h-5 w-5"/></button>
-                                <button onClick={() => handleDeleteCreation(creation.id)} className="p-1.5 text-slate-300 hover:text-red-400" title="מחק"><TrashIcon className="h-5 w-5"/></button>
-                            </div>
-                        </div>
-                        </div>
-                    ))}
-                </div>
-                )}
-            </div>
-          </>
-      </main>
+      {showTutorial && <TutorialOverlay onClose={handleCloseTutorial} />}
+
+      {previewImageIndex !== null && (
+        <SourceImagePreview
+            images={sourceImages}
+            currentIndex={previewImageIndex}
+            onClose={() => setPreviewImageIndex(null)}
+            onNavigate={setPreviewImageIndex}
+        />
+      )}
 
       <div aria-live="polite" aria-atomic="true" className="fixed bottom-5 right-5 z-[200] flex flex-col items-end gap-2">
         {toasts.map(toast => (
@@ -1420,8 +1855,8 @@ const App: React.FC = () => {
             animation: fade-in-out 3s ease-in-out forwards;
           }
           @keyframes welcome-pulse {
-            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); } /* sky-400 */
-            70% { transform: scale(1.1); box-shadow: 0 0 0 20px rgba(56, 189, 248, 0); }
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(168, 85, 247, 0.7); } /* purple-500 */
+            70% { transform: scale(1.1); box-shadow: 0 0 0 20px rgba(168, 85, 247, 0); }
             100% { transform: scale(1); }
           }
           .animate-welcome-pulse {
@@ -1433,7 +1868,7 @@ const App: React.FC = () => {
       {isKeyConfigured && !isChatOpen && (
         <button
             onClick={() => setIsChatOpen(true)}
-            className="fixed bottom-5 right-5 z-[90] p-4 bg-gradient-to-br from-sky-500 to-indigo-600 text-white rounded-full shadow-2xl hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-sky-500 focus:ring-offset-slate-900 transition-transform animate-welcome-pulse"
+            className="fixed bottom-5 right-5 z-[90] p-4 bg-gradient-to-br from-cyan-500 via-purple-600 to-pink-600 text-white rounded-full shadow-2xl hover:scale-110 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 focus:ring-offset-slate-900 transition-transform animate-welcome-pulse"
             aria-label="פתח צ'אט"
         >
             <ChatBubbleLeftRightIcon className="h-8 w-8" />

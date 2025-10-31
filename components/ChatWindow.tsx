@@ -37,7 +37,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ isOpen, onClose, history
     if (!isOpen) return null;
 
     return (
-        <div className="fixed bottom-24 right-5 w-full max-w-sm h-full max-h-[calc(100vh-8rem)] bg-slate-900/70 backdrop-blur-xl rounded-2xl shadow-2xl ring-1 ring-white/10 z-[100] flex flex-col overflow-hidden animate-slide-up">
+        <div className="fixed bottom-24 right-5 w-full max-w-sm h-full max-h-[calc(100vh-8rem)] bg-slate-900/80 backdrop-blur-xl rounded-2xl shadow-2xl shadow-black/60 ring-1 ring-slate-400/30 z-[100] flex flex-col overflow-hidden animate-slide-up">
             <header className="flex items-center justify-between p-4 border-b border-white/10 flex-shrink-0">
                 <h3 className="font-semibold text-slate-200">שוחח עם Gemini</h3>
                 <div className="flex items-center gap-4">
@@ -46,8 +46,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ isOpen, onClose, history
                     <span className={`text-xs font-medium transition-colors ${isThinkingMode ? 'text-slate-200' : 'text-slate-500'}`}>מצב חשיבה</span>
                     <button
                         onClick={() => onThinkingModeChange(!isThinkingMode)}
-                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                        isThinkingMode ? 'bg-sky-600' : 'bg-slate-700'
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                        isThinkingMode ? 'bg-purple-600' : 'bg-slate-700'
                         }`}
                         aria-pressed={isThinkingMode}
                     >
@@ -72,7 +72,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ isOpen, onClose, history
                 )}
                 {history.map((msg, index) => (
                     <div key={index} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl ${msg.role === 'user' ? 'bg-sky-600 text-white rounded-br-lg' : 'bg-slate-700/50 text-slate-200 rounded-bl-lg'}`}>
+                        <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl ${msg.role === 'user' ? 'bg-gradient-to-br from-purple-600 to-pink-600 text-white rounded-br-lg' : 'bg-slate-700/50 text-slate-200 rounded-bl-lg'}`}>
                             <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                         </div>
                     </div>
@@ -97,10 +97,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ isOpen, onClose, history
                         value={input}
                         onChange={onInputChange}
                         placeholder="שאל אותי משהו..."
-                        className="flex-grow bg-slate-800/50 border-slate-700 rounded-full shadow-sm focus:ring-2 focus:ring-sky-500 focus:border-sky-500 sm:text-sm text-slate-200 placeholder-slate-500 px-4 py-2"
+                        className="flex-grow bg-slate-800/50 border-slate-700 rounded-full shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500 px-4 py-2"
                         disabled={isLoading}
                     />
-                    <button type="submit" className="p-2.5 rounded-full bg-sky-600 text-white hover:bg-sky-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors" disabled={isLoading || !input.trim()}>
+                    <button type="submit" className="p-2.5 rounded-full bg-purple-600 text-white hover:bg-purple-700 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors" disabled={isLoading || !input.trim()}>
                         <PaperAirplaneIcon className="h-5 w-5" />
                     </button>
                 </form>
