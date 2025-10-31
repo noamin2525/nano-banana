@@ -1,5 +1,6 @@
 
 
+
 import React from 'react';
 
 export const UploadIcon = ({ className }: { className?: string }) => (
@@ -291,4 +292,29 @@ export const TrophyIcon = ({ className }: { className?: string }) => (
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 9.75V3.75m0 0a1.5 1.5 0 0 1 3 0v6m-3 0h3m6 0v-6a1.5 1.5 0 0 0-3 0v6m3 0h-3" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M12 21v-2.25" />
     </svg>
+);
+
+export const RectangleGroupIcon = ({ className }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.25 3.75H4.5A1.5 1.5 0 0 0 3 5.25v4.5A1.5 1.5 0 0 0 4.5 11.25h4.75A1.5 1.5 0 0 0 10.75 9.75v-4.5A1.5 1.5 0 0 0 9.25 3.75Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9.25 12.75H4.5A1.5 1.5 0 0 0 3 14.25v4.5A1.5 1.5 0 0 0 4.5 20.25h4.75a1.5 1.5 0 0 0 1.5-1.5v-4.5a1.5 1.5 0 0 0-1.5-1.5Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 3.75h-4.75A1.5 1.5 0 0 0 13.25 5.25v4.5A1.5 1.5 0 0 0 14.75 11.25H19.5A1.5 1.5 0 0 0 21 9.75v-4.5A1.5 1.5 0 0 0 19.5 3.75Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12.75h-4.75a1.5 1.5 0 0 0-1.5 1.5v4.5a1.5 1.5 0 0 0 1.5 1.5H19.5a1.5 1.5 0 0 0 1.5-1.5v-4.5a1.5 1.5 0 0 0-1.5-1.5Z" />
+    </svg>
+);
+
+export const Layout2ColIcon = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}><path d="M3 3h8v18H3V3zm10 0h8v18h-8V3z" /></svg>
+);
+export const Layout2RowIcon = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}><path d="M3 3h18v8H3V3zm0 10h18v8H3v-8z" /></svg>
+);
+export const Layout1Top2BotIcon = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}><path d="M3 3h18v8H3V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" /></svg>
+);
+export const Layout1Left2RightIcon = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}><path d="M3 3h8v18H3V3zm10 0h8v8h-8V3zm0 10h8v8h-8v-8z" /></svg>
+);
+export const Layout2x2Icon = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" /></svg>
 );

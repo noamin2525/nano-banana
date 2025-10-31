@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { 
@@ -20,7 +21,8 @@ import {
     AspectRatioThreeFourIcon, PlusIcon, XMarkIcon, ArrowsPointingOutIcon, AdjustmentsHorizontalIcon, 
     CheckIcon, ArrowUturnLeftIcon, BeakerIcon, ClipboardDocumentIcon, KeyIcon,
     ChatBubbleLeftRightIcon, MagnifyingGlassPlusIcon, MagnifyingGlassMinusIcon, ArrowsPointingInIcon,
-    PencilIcon, Square2StackIcon, Squares2X2Icon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PaintBrushIcon
+    PencilIcon, Square2StackIcon, Squares2X2Icon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, PaintBrushIcon,
+    RectangleGroupIcon, Layout2ColIcon, Layout2RowIcon, Layout1Top2BotIcon, Layout1Left2RightIcon, Layout2x2Icon
 } from './components/Icons';
 import { ChatWindow } from './components/ChatWindow';
 import { TutorialOverlay } from './components/TutorialOverlay';
@@ -42,8 +44,18 @@ type Adjustment = {
 
 type StyleKey = keyof typeof STYLES;
 type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4';
-type Mode = 'create' | 'edit' | 'combine';
+type Mode = 'create' | 'edit' | 'combine' | 'collage';
 type ActiveTool = 'resize' | 'edit' | 'inpaint';
+
+type CollageLayout = '2-col' | '2-row' | '1-top-2-bot' | '1-left-2-right' | '2x2';
+
+type LayoutDefinition = {
+    name: CollageLayout;
+    icon: React.FC<{className?: string}>;
+    minImages: number;
+    maxImages: number;
+};
+
 
 type Creation = {
   id: string;
@@ -51,7 +63,7 @@ type Creation = {
   prompt: string;
   styles: StyleKey[];
   aspectRatio?: AspectRatio;
-  model: 'imagen' | 'gemini-flash';
+  model: 'imagen' | 'gemini-flash' | 'collage';
 };
 
 type Toast = {
@@ -163,17 +175,17 @@ const generateFilterString = (adj: Adjustment): string => {
 
 const AdjustmentSlider: React.FC<{
     label: string;
-    name: keyof Adjustment;
+    name: keyof Adjustment | 'collageSpacing' | 'collageCornerRadius';
     value: number;
     min: number;
     max: number;
-    onChange: (name: keyof Adjustment, value: string) => void;
+    onChange: (name: any, value: string) => void;
     disabled: boolean;
 }> = ({ label, name, value, min, max, onChange, disabled }) => (
     <div>
         <div className="flex justify-between items-center text-xs mb-1">
             <label htmlFor={name} className="font-medium text-slate-300">{label}</label>
-            <span className="text-slate-200 font-mono bg-slate-900/50 px-1.5 py-0.5 rounded-md">{value}%</span>
+            <span className="text-slate-200 font-mono bg-slate-900/50 px-1.5 py-0.5 rounded-md">{value}{name.includes('collage') ? 'px' : '%'}</span>
         </div>
         <input
             id={name}
@@ -602,6 +614,11 @@ const App: React.FC = () => {
   const [isMaskDrawn, setIsMaskDrawn] = useState(false);
   const [brushCursor, setBrushCursor] = useState({ visible: false, x: 0, y: 0 });
 
+  // Collage State
+  const [collageLayout, setCollageLayout] = useState<CollageLayout | null>(null);
+  const [collageSpacing, setCollageSpacing] = useState<number>(10);
+  const [collageCornerRadius, setCollageCornerRadius] = useState<number>(0);
+
 
   // Zoom & Pan state
   const [zoom, setZoom] = useState(1);
@@ -673,16 +690,18 @@ const App: React.FC = () => {
   }, [showToast]);
 
   useEffect(() => {
-    if (sourceImages.length > 0 && mode === 'create') {
-        setMode('edit');
-    } else if (sourceImages.length === 0 && mode !== 'create') {
-        setMode('create');
-    } else if (sourceImages.length > 1 && mode !== 'combine') {
-        setMode('combine');
-    } else if (sourceImages.length === 1 && mode === 'combine') {
-        setMode('edit');
+    const count = sourceImages.length;
+    if (mode === 'edit' && count !== 1) {
+        setMode(count > 1 ? 'combine' : 'create');
     }
-  }, [sourceImages, mode]);
+    if ((mode === 'combine' || mode === 'collage') && count < 2) {
+        setMode(count === 1 ? 'edit' : 'create');
+        setCollageLayout(null);
+    }
+    if (mode === 'create' && count > 0) {
+        setMode(count === 1 ? 'edit' : 'combine');
+    }
+  }, [sourceImages.length, mode]);
 
   const aspectRatios: { value: AspectRatio; label: string; icon: React.FC<{className?: string}> }[] = [
     { value: '1:1', label: 'ריבוע', icon: AspectRatioSquareIcon },
@@ -712,12 +731,19 @@ const App: React.FC = () => {
             btnText = "חבר תמונות";
             pLabel = "איך לחבר את התמונות?";
             break;
+        case 'collage':
+            btnText = "צור קולאז'";
+            pLabel = '';
+            break;
     }
     
-    const submittable = hasPrompt || hasStyles || (mode !== 'create' && sourceImages.length > 0);
+    const submittable = mode === 'collage' 
+      ? sourceImages.length >= 2 && collageLayout !== null
+      : hasPrompt || hasStyles || (mode !== 'create' && sourceImages.length > 0);
+
 
     return { buttonText: btnText, promptLabel: pLabel, isSubmittable: submittable };
-  }, [prompt, sourceImages.length, selectedStyles, mode]);
+  }, [prompt, sourceImages.length, selectedStyles, mode, collageLayout]);
 
   const handleStyleClick = (styleKey: StyleKey) => {
     setSelectedStyles(prev => {
@@ -741,9 +767,12 @@ const App: React.FC = () => {
       });
     
     const newImages = await Promise.all(imagePromises);
-    setSourceImages(prev => [...prev, ...newImages]);
+    setSourceImages(prev => [...prev, ...newImages].slice(0, 4)); // Limit to 4 images for collages
+    if (sourceImages.length + newImages.length > 4) {
+        showToast("ניתן להשתמש בעד 4 תמונות לקולאז'.");
+    }
     setError(null);
-  }, []);
+  }, [sourceImages, showToast]);
 
   const handleRemoveImage = (id: string) => {
     setSourceImages(prev => prev.filter(img => img.id !== id));
@@ -809,6 +838,9 @@ const App: React.FC = () => {
     setIsApplyingEdits(false);
     setIsApplyingInpainting(false);
     setPromptSuggestions([]);
+    setCollageLayout(null);
+    setCollageSpacing(10);
+    setCollageCornerRadius(0);
   };
   
   const handleSurpriseMe = () => {
@@ -818,9 +850,140 @@ const App: React.FC = () => {
 
   const isKeyConfigured = hasSelectedApiKey || !!validManualApiKey;
 
+  const handleCreateCollage = async () => {
+    if (!collageLayout || sourceImages.length < 2) return;
+
+    setIsLoading(true);
+    setError(null);
+    resetResultState();
+
+    try {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error("לא ניתן היה ליצור קנבס.");
+
+        const CANVAS_SIZE = 1024;
+        canvas.width = CANVAS_SIZE;
+        canvas.height = CANVAS_SIZE;
+        ctx.fillStyle = '#020617'; // bg-slate-950
+        ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+        const loadedImages = await Promise.all(
+            sourceImages.map(imgState => new Promise<HTMLImageElement>((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = imgState.dataUrl;
+            }))
+        );
+
+        const s = collageSpacing;
+        const r = collageCornerRadius;
+        const w = CANVAS_SIZE;
+        const h = CANVAS_SIZE;
+
+        const drawRoundedImage = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+            if (!ctx) return;
+            ctx.save();
+            if (r > 0) {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.arcTo(x + w, y, x + w, y + h, r);
+                ctx.arcTo(x + w, y + h, x, y + h, r);
+                ctx.arcTo(x, y + h, x, y, r);
+                ctx.arcTo(x, y, x + w, y, r);
+                ctx.closePath();
+                ctx.clip();
+            }
+            ctx.drawImage(img, x, y, w, h);
+            ctx.restore();
+        };
+
+        const drawImageCropped = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+            const imgRatio = img.width / img.height;
+            const rectRatio = w / h;
+            let sx, sy, sw, sh;
+            if (imgRatio > rectRatio) { // Image is wider than rect
+                sh = img.height;
+                sw = sh * rectRatio;
+                sx = (img.width - sw) / 2;
+                sy = 0;
+            } else { // Image is taller than rect
+                sw = img.width;
+                sh = sw / rectRatio;
+                sy = (img.height - sh) / 2;
+                sx = 0;
+            }
+            ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+        };
+        
+        const drawAndClip = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+             ctx.save();
+             if (r > 0) {
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.arcTo(x + w, y, x + w, y + h, r);
+                ctx.arcTo(x + w, y + h, x, y + h, r);
+                ctx.arcTo(x, y + h, x, y, r);
+                ctx.arcTo(x, y, x + w, y, r);
+                ctx.closePath();
+                ctx.clip();
+            }
+            drawImageCropped(img, x, y, w, h);
+            ctx.restore();
+        };
+
+        switch (collageLayout) {
+            case '2-col':
+                drawAndClip(loadedImages[0], s, s, (w - 3 * s) / 2, h - 2 * s);
+                drawAndClip(loadedImages[1], w / 2 + s / 2, s, (w - 3 * s) / 2, h - 2 * s);
+                break;
+            case '2-row':
+                drawAndClip(loadedImages[0], s, s, w - 2 * s, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[1], s, h / 2 + s / 2, w - 2 * s, (h - 3 * s) / 2);
+                break;
+            case '1-top-2-bot':
+                drawAndClip(loadedImages[0], s, s, w - 2 * s, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[1], s, h / 2 + s / 2, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[2], w / 2 + s / 2, h / 2 + s / 2, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                break;
+            case '1-left-2-right':
+                drawAndClip(loadedImages[0], s, s, (w - 3 * s) / 2, h - 2 * s);
+                drawAndClip(loadedImages[1], w / 2 + s / 2, s, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[2], w / 2 + s / 2, h / 2 + s / 2, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                break;
+            case '2x2':
+                drawAndClip(loadedImages[0], s, s, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[1], w / 2 + s / 2, s, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[2], s, h / 2 + s / 2, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                drawAndClip(loadedImages[3], w / 2 + s / 2, h / 2 + s / 2, (w - 3 * s) / 2, (h - 3 * s) / 2);
+                break;
+        }
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const base64 = dataUrl.split(',')[1];
+        
+        const newImageState: ImageState = { id: `collage-${Date.now()}`, dataUrl, mimeType: 'image/png', base64 };
+        setResultImage(newImageState);
+        setOriginalImageDimensions({ width: CANVAS_SIZE, height: CANVAS_SIZE });
+        setResizeWidth(CANVAS_SIZE.toString());
+        setResizeHeight(CANVAS_SIZE.toString());
+
+    } catch (err) {
+        setError(err instanceof Error ? err.message : "יצירת הקולאז' נכשלה.");
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoading || !isSubmittable || !isKeyConfigured) return;
+
+    if (mode === 'collage') {
+        await handleCreateCollage();
+        return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -844,12 +1007,14 @@ const App: React.FC = () => {
 
     try {
       let result: { base64: string; mimeType: string; };
+      let modelUsed: Creation['model'] = 'gemini-flash';
 
       if (mode === 'edit' || mode === 'combine') {
         const imagePayload = sourceImages.map(img => ({ base64: img.base64, mimeType: img.mimeType }));
         result = await generateFromImagesAndPrompt(imagePayload, finalPrompt, validManualApiKey ?? undefined);
       } else { // 'create' mode
         result = await generateImageWithGemini(finalPrompt, aspectRatio, validManualApiKey ?? undefined);
+        modelUsed = 'imagen';
       }
       
       const { base64, mimeType } = result;
@@ -875,7 +1040,7 @@ const App: React.FC = () => {
         image: newImageState,
         prompt: prompt.trim(),
         styles: selectedStyles,
-        model: mode !== 'create' ? 'gemini-flash' : 'imagen',
+        model: modelUsed,
         aspectRatio: mode === 'create' ? aspectRatio : undefined,
       };
       
@@ -1357,6 +1522,24 @@ const App: React.FC = () => {
   const sourceCount = sourceImages.length;
   const isBusy = isLoading || isResizing || isApplyingEdits || isAnalyzing || isApplyingInpainting;
   
+  const collageLayouts: LayoutDefinition[] = useMemo(() => [
+        { name: '2-col', icon: Layout2ColIcon, minImages: 2, maxImages: 2 },
+        { name: '2-row', icon: Layout2RowIcon, minImages: 2, maxImages: 2 },
+        { name: '1-top-2-bot', icon: Layout1Top2BotIcon, minImages: 3, maxImages: 3 },
+        { name: '1-left-2-right', icon: Layout1Left2RightIcon, minImages: 3, maxImages: 3 },
+        { name: '2x2', icon: Layout2x2Icon, minImages: 4, maxImages: 4 },
+    ], []);
+
+  const availableLayouts = useMemo(() => {
+    return collageLayouts.filter(l => sourceCount >= l.minImages && sourceCount <= l.maxImages);
+  }, [sourceCount, collageLayouts]);
+
+  useEffect(() => {
+    if (mode === 'collage' && availableLayouts.length > 0 && !availableLayouts.find(l => l.name === collageLayout)) {
+        setCollageLayout(null);
+    }
+  }, [mode, availableLayouts, collageLayout]);
+
   if (isCheckingApiKey) {
       return (
         <div className="flex items-center justify-center min-h-screen">
@@ -1469,16 +1652,17 @@ const App: React.FC = () => {
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-2 rounded-lg bg-black/20 p-1 ring-1 ring-slate-700">
             {(
                 [
-                    {key: 'create', label: 'צור', icon: SparklesIcon},
-                    {key: 'edit', label: 'ערוך', icon: PencilIcon},
-                    {key: 'combine', label: 'חבר', icon: Square2StackIcon},
+                    {key: 'create', label: 'צור', icon: SparklesIcon, disabled: isBusy},
+                    {key: 'edit', label: 'ערוך', icon: PencilIcon, disabled: isBusy || sourceCount !== 1},
+                    {key: 'combine', label: 'חבר', icon: Square2StackIcon, disabled: isBusy || sourceCount < 2},
+                    {key: 'collage', label: 'קולאז\'', icon: RectangleGroupIcon, disabled: isBusy || sourceCount < 2},
                 ] as const
-            ).map(({key, label, icon: Icon}) => (
+            ).map(({key, label, icon: Icon, disabled}) => (
                 <button
                     key={key}
                     onClick={() => setMode(key)}
-                    disabled={isBusy}
-                    className={`flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 disabled:opacity-50 ${
+                    disabled={disabled}
+                    className={`flex items-center gap-2 px-4 py-1.5 text-sm font-semibold rounded-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
                         mode === key ? 'bg-purple-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
                     }`}
                 >
@@ -1553,78 +1737,103 @@ const App: React.FC = () => {
                                     </div>
                                 ))}
                                 <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/png, image/jpeg, image/webp" disabled={isBusy} multiple/>
-                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy} className="aspect-square rounded-md border-2 border-dashed border-slate-700 text-slate-500 flex flex-col items-center justify-center hover:bg-slate-800/50 hover:border-purple-500 hover:text-purple-400 transition-all duration-200 disabled:opacity-50" aria-label="הוספת תמונות">
+                                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isBusy || sourceCount >= 4} className="aspect-square rounded-md border-2 border-dashed border-slate-700 text-slate-500 flex flex-col items-center justify-center hover:bg-slate-800/50 hover:border-purple-500 hover:text-purple-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" aria-label="הוספת תמונות">
                                     <PlusIcon className="h-6 w-6"/>
                                 </button>
                             </div>
                         </div>
                     )}
                     
-                    <div id="style-selector">
-                        <label className="block text-sm font-semibold text-slate-300 mb-2">סגנון</label>
-                         <div className="space-y-2">
-                             {Object.entries(STYLE_CATEGORIES).map(([category, styles]) => (
-                                 <details key={category} className="bg-black/20 rounded-lg" open={category === 'תנועות אמנותיות'}>
-                                     <summary className="px-3 py-2 text-xs font-semibold text-slate-300 cursor-pointer flex justify-between items-center ring-1 ring-slate-700 rounded-lg">
-                                         {category}
-                                         <ChevronDownIcon className="h-4 w-4 transition-transform accordion-icon" />
-                                     </summary>
-                                     <div className="p-3 flex flex-wrap gap-2">
-                                         {styles.map(styleKey => (
-                                            <button key={styleKey} type="button" onClick={() => handleStyleClick(styleKey)} disabled={isBusy} className={`px-3 py-1 text-sm font-medium rounded-full transition-all duration-200 disabled:opacity-50 ${selectedStyles.includes(styleKey) ? 'text-white shadow-md ring-2 ring-purple-500 bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700'}`}>
-                                                {styleKey}
-                                            </button>
-                                         ))}
-                                     </div>
-                                 </details>
-                             ))}
-                         </div>
-                    </div>
-
-                    {mode === 'create' && (
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-300 mb-2">יחס גובה-רוחב</label>
-                            <div className="flex items-center gap-2 rounded-lg bg-black/20 p-1 ring-1 ring-slate-700">
-                                {aspectRatios.map(({ value, label, icon: Icon }) => (
-                                    <button key={value} type="button" onClick={() => setAspectRatio(value)} disabled={isBusy} aria-label={label} className={`flex-1 flex flex-col items-center justify-center p-2 text-xs font-semibold rounded-md transition-all duration-200 disabled:opacity-50 ${aspectRatio === value ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
-                                        <Icon className="h-6 w-6 mb-1" />
-                                        {label}
-                                    </button>
+                    { (mode === 'create' || mode === 'edit' || mode === 'combine') && <>
+                        <div id="style-selector">
+                            <label className="block text-sm font-semibold text-slate-300 mb-2">סגנון</label>
+                            <div className="space-y-2">
+                                {Object.entries(STYLE_CATEGORIES).map(([category, styles]) => (
+                                    <details key={category} className="bg-black/20 rounded-lg" open={category === 'תנועות אמנותיות'}>
+                                        <summary className="px-3 py-2 text-xs font-semibold text-slate-300 cursor-pointer flex justify-between items-center ring-1 ring-slate-700 rounded-lg">
+                                            {category}
+                                            <ChevronDownIcon className="h-4 w-4 transition-transform accordion-icon" />
+                                        </summary>
+                                        <div className="p-3 flex flex-wrap gap-2">
+                                            {styles.map(styleKey => (
+                                                <button key={styleKey} type="button" onClick={() => handleStyleClick(styleKey)} disabled={isBusy} className={`px-3 py-1 text-sm font-medium rounded-full transition-all duration-200 disabled:opacity-50 ${selectedStyles.includes(styleKey) ? 'text-white shadow-md ring-2 ring-purple-500 bg-gradient-to-r from-purple-600 to-pink-600' : 'bg-slate-800/70 text-slate-300 hover:bg-slate-700/70 ring-1 ring-slate-700'}`}>
+                                                    {styleKey}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </details>
                                 ))}
                             </div>
                         </div>
-                    )}
 
-                    <div>
-                        <div className="flex justify-between items-center mb-1">
-                            <label htmlFor="prompt" className="block text-sm font-semibold text-slate-300">{promptLabel}</label>
-                            <button type="button" onClick={handleSurpriseMe} disabled={isBusy} className="flex items-center gap-1 text-sm text-pink-400 hover:text-pink-300 disabled:opacity-50 transition-colors" aria-label="הצע הנחיה אקראית">
-                                <MagicWandIcon className="h-4 w-4" />
-                                הפתיעו אותי
-                            </button>
-                        </div>
-                        <textarea
-                            id="prompt-textarea" name="prompt" rows={3}
-                            className="mt-1 block w-full bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500"
-                            placeholder={mode === 'create' ? "לדוגמה: 'אריה מלכותי עונד כתר'" : mode === 'edit' ? "לדוגמה: 'הוסף אפקט גרעיניות של סרט רטרו'" : "לדוגמה: 'הצב את האדם מהתמונה הראשונה ברקע של התמונה השנייה'"}
-                            value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isBusy}/>
-                        <button id="prompt-analyzer-button" type="button" onClick={handleAnalyzePrompt} disabled={isBusy || !prompt.trim()} className="flex items-center gap-1 text-sm text-purple-400 hover:text-purple-300 disabled:opacity-50 transition-colors mt-2" aria-label="נתח הנחיה">
-                            {isAnalyzing ? <SpinnerIcon className="h-4 w-4 animate-spin"/> : <BeakerIcon className="h-4 w-4" />}
-                            {isAnalyzing ? 'מנתח...' : 'נתח וחדד הנחיה'}
-                        </button>
-
-                        {promptSuggestions.length > 0 && (
-                            <div className="space-y-2 mt-2">
-                                <div className="flex flex-wrap gap-2">
-                                    {promptSuggestions.map((suggestion, index) => (
-                                        <button key={index} type="button" onClick={() => setPrompt(prev => `${prev}, ${suggestion}`)} className="px-2.5 py-1 text-xs bg-slate-800/70 text-slate-300 rounded-full hover:bg-slate-700/70 ring-1 ring-slate-700">
-                                            + {suggestion}
+                        {mode === 'create' && (
+                            <div>
+                                <label className="block text-sm font-semibold text-slate-300 mb-2">יחס גובה-רוחב</label>
+                                <div className="flex items-center gap-2 rounded-lg bg-black/20 p-1 ring-1 ring-slate-700">
+                                    {aspectRatios.map(({ value, label, icon: Icon }) => (
+                                        <button key={value} type="button" onClick={() => setAspectRatio(value)} disabled={isBusy} aria-label={label} className={`flex-1 flex flex-col items-center justify-center p-2 text-xs font-semibold rounded-md transition-all duration-200 disabled:opacity-50 ${aspectRatio === value ? 'bg-purple-600 text-white shadow-lg' : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
+                                            <Icon className="h-6 w-6 mb-1" />
+                                            {label}
                                         </button>
                                     ))}
                                 </div>
                             </div>
                         )}
-                    </div>
+
+                        <div>
+                            <div className="flex justify-between items-center mb-1">
+                                <label htmlFor="prompt" className="block text-sm font-semibold text-slate-300">{promptLabel}</label>
+                                <button type="button" onClick={handleSurpriseMe} disabled={isBusy} className="flex items-center gap-1 text-sm text-pink-400 hover:text-pink-300 disabled:opacity-50 transition-colors" aria-label="הצע הנחיה אקראית">
+                                    <MagicWandIcon className="h-4 w-4" />
+                                    הפתיעו אותי
+                                </button>
+                            </div>
+                            <textarea
+                                id="prompt-textarea" name="prompt" rows={3}
+                                className="mt-1 block w-full bg-slate-900/50 border-slate-700 rounded-md shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 sm:text-sm text-slate-200 placeholder-slate-500"
+                                placeholder={mode === 'create' ? "לדוגמה: 'אריה מלכותי עונד כתר'" : mode === 'edit' ? "לדוגמה: 'הוסף אפקט גרעיניות של סרט רטרו'" : "לדוגמה: 'הצב את האדם מהתמונה הראשונה ברקע של התמונה השנייה'"}
+                                value={prompt} onChange={(e) => setPrompt(e.target.value)} disabled={isBusy}/>
+                            <button id="prompt-analyzer-button" type="button" onClick={handleAnalyzePrompt} disabled={isBusy || !prompt.trim()} className="flex items-center gap-1 text-sm text-purple-400 hover:text-purple-300 disabled:opacity-50 transition-colors mt-2" aria-label="נתח הנחיה">
+                                {isAnalyzing ? <SpinnerIcon className="h-4 w-4 animate-spin"/> : <BeakerIcon className="h-4 w-4" />}
+                                {isAnalyzing ? 'מנתח...' : 'נתח וחדד הנחיה'}
+                            </button>
+
+                            {promptSuggestions.length > 0 && (
+                                <div className="space-y-2 mt-2">
+                                    <div className="flex flex-wrap gap-2">
+                                        {promptSuggestions.map((suggestion, index) => (
+                                            <button key={index} type="button" onClick={() => setPrompt(prev => `${prev}, ${suggestion}`)} className="px-2.5 py-1 text-xs bg-slate-800/70 text-slate-300 rounded-full hover:bg-slate-700/70 ring-1 ring-slate-700">
+                                                + {suggestion}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </>}
+
+                    {mode === 'collage' && (
+                         <div id="collage-settings" className="space-y-6">
+                            <div>
+                                <h3 className="text-sm font-semibold text-slate-300 mb-2">פריסה</h3>
+                                <div className="grid grid-cols-5 gap-2">
+                                    {availableLayouts.map(({ name, icon: Icon }) => (
+                                        <button
+                                            key={name}
+                                            type="button"
+                                            onClick={() => setCollageLayout(name)}
+                                            className={`aspect-square flex items-center justify-center rounded-md transition-all duration-200 ${ collageLayout === name ? 'bg-purple-600 text-white ring-2 ring-purple-400' : 'bg-slate-800/70 text-slate-400 hover:bg-slate-700/70 ring-1 ring-slate-700'}`}
+                                        >
+                                            <Icon className="h-8 w-8" />
+                                        </button>
+                                    ))}
+                                </div>
+                                {availableLayouts.length === 0 && <p className="text-xs text-slate-500 text-center py-4">העלו 2-4 תמונות כדי לבחור פריסת קולאז'.</p>}
+                            </div>
+                            <AdjustmentSlider label="מרווח" name="collageSpacing" value={collageSpacing} min={0} max={50} onChange={(_, val) => setCollageSpacing(parseInt(val, 10))} disabled={isBusy} />
+                            <AdjustmentSlider label="עיגול פינות" name="collageCornerRadius" value={collageCornerRadius} min={0} max={50} onChange={(_, val) => setCollageCornerRadius(parseInt(val, 10))} disabled={isBusy} />
+                         </div>
+                    )}
                 </form>
             </div>
             <div className="flex-shrink-0 p-4 border-t border-white/10 mt-auto">
