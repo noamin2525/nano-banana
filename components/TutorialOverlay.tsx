@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { XMarkIcon } from './Icons';
 
@@ -58,6 +59,8 @@ export const TutorialOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) 
       const element = document.querySelector(currentStep.target);
       if (element) {
         setTargetRect(element.getBoundingClientRect());
+      } else {
+        setTargetRect(null); // Explicitly hide if target is not visible
       }
     };
     
@@ -110,7 +113,7 @@ export const TutorialOverlay: React.FC<{ onClose: () => void }> = ({ onClose }) 
             break;
     }
     return styles;
-  }, [targetRect, currentStep.position, currentStep.target]);
+  }, [targetRect, currentStep.position]);
   
   const handleNext = () => {
     if (step < tutorialSteps.length - 1) {

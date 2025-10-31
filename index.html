@@ -146,14 +146,17 @@
   }
   
   /* Style scrollbar for webkit browsers */
-  .panel-scroll-content::-webkit-scrollbar {
+  .panel-scroll-content::-webkit-scrollbar,
+  .chat-history-scrollbar::-webkit-scrollbar {
     width: 6px;
   }
-  .panel-scroll-content::-webkit-scrollbar-track {
+  .panel-scroll-content::-webkit-scrollbar-track,
+  .chat-history-scrollbar::-webkit-scrollbar-track {
     background: #1e293b; /* slate-800 */
     border-radius: 10px;
   }
-  .panel-scroll-content::-webkit-scrollbar-thumb {
+  .panel-scroll-content::-webkit-scrollbar-thumb,
+  .chat-history-scrollbar::-webkit-scrollbar-thumb {
     background-color: #64748b; /* slate-500 */
     border-radius: 10px;
     border: 2px solid #1e293b; /* slate-800 */
@@ -170,6 +173,51 @@
   details[open] summary .accordion-icon {
       transform: rotate(180deg);
   }
+
+  /* Chat Window Specific Styles */
+  .chat-code-block {
+    background-color: #0f172a; /* slate-900 */
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+    border: 1px solid #334155; /* slate-700 */
+  }
+  .chat-code-block .code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1e293b; /* slate-800 */
+    padding: 0.25rem 0.75rem;
+    color: #94a3b8; /* slate-400 */
+    font-size: 0.75rem;
+  }
+  .chat-code-block pre {
+    padding: 0.75rem;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #64748b #1e293b;
+  }
+  .chat-code-block pre::-webkit-scrollbar { height: 6px; }
+  .chat-code-block pre::-webkit-scrollbar-thumb { background-color: #64748b; }
+  .chat-code-block pre::-webkit-scrollbar-track { background-color: #1e293b; }
+
+  .chat-bubble-content ul {
+    list-style-type: disc;
+    padding-right: 1.25rem;
+  }
+
+  @keyframes thinking-dots {
+    0%, 80%, 100% { transform: scale(0); }
+    40% { transform: scale(1.0); }
+  }
+  .thinking-dot {
+    animation: thinking-dots 1.4s infinite ease-in-out both;
+  }
+  .thinking-dot:nth-child(1) { animation-delay: -0.32s; }
+  .thinking-dot:nth-child(2) { animation-delay: -0.16s; }
+
 
 </style>
 </head>

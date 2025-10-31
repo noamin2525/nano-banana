@@ -59,6 +59,11 @@ type Toast = {
   message: string;
 };
 
+type ChatMessage = { 
+    role: 'user' | 'model';
+    text: string;
+};
+
 
 const INITIAL_ADJUSTMENTS: Adjustment = {
   brightness: 100,
@@ -533,6 +538,11 @@ const SourceImagePreview: React.FC<{
     );
 };
 
+const CHAT_WELCOME_MESSAGE: ChatMessage = {
+    role: 'model',
+    text: "שלום! אני העוזר היצירתי שלך. איך אני יכול לעזור לך היום? אפשר לשאול אותי שאלות, לבקש רעיונות להנחיות, או לקבל עזרה עם הכלים השונים."
+};
+
 const App: React.FC = () => {
   const [sourceImages, setSourceImages] = useState<ImageState[]>([]);
   const [resultImage, setResultImage] = useState<ImageState | null>(null);
@@ -568,8 +578,7 @@ const App: React.FC = () => {
 
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'model', text: string }[]>([]);
-  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([CHAT_WELCOME_MESSAGE]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [isThinkingMode, setIsThinkingMode] = useState(false);
 
@@ -1287,14 +1296,12 @@ const App: React.FC = () => {
   };
 
 
-  const handleSendChatMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim() || isChatLoading) return;
+  const handleSendChatMessage = async (userMessageText: string) => {
+    if (!userMessageText.trim() || isChatLoading) return;
 
-    const userMessage = { role: 'user' as const, text: chatInput };
+    const userMessage = { role: 'user' as const, text: userMessageText };
     const newHistory = [...chatHistory, userMessage];
     setChatHistory(newHistory);
-    setChatInput('');
     setIsChatLoading(true);
 
     try {
@@ -1315,6 +1322,11 @@ const App: React.FC = () => {
     } finally {
         setIsChatLoading(false);
     }
+  };
+  
+  const handleClearChat = () => {
+    setChatHistory([CHAT_WELCOME_MESSAGE]);
+    showToast("היסטוריית הצ'אט נוקתה");
   };
 
   const handleResetZoomAndPan = () => {
@@ -1880,12 +1892,11 @@ const App: React.FC = () => {
             isOpen={isChatOpen}
             onClose={() => setIsChatOpen(false)}
             history={chatHistory}
-            input={chatInput}
-            onInputChange={(e) => setChatInput(e.target.value)}
             onSend={handleSendChatMessage}
             isLoading={isChatLoading}
             isThinkingMode={isThinkingMode}
             onThinkingModeChange={setIsThinkingMode}
+            onClear={handleClearChat}
         />
       )}
 
